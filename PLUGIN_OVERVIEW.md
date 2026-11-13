@@ -6,7 +6,7 @@ On a folded iPhone Duo the cover screen keeps a side rail beside the camera. iOS
 - **Keeps the camera area clear.** The thread header stops beside the camera and the iOS status bar. An opaque cap in your theme's background colour covers that block, so text scrolls under it instead of under the clock and battery icons.
 - **Rail buttons.** A button in the rail, just below the camera area, switches between expanded and restored. While the rail is restored, a second button opens bb's sidebar. Both hide while a sheet or dialog is open.
 
-The plugin only acts when it finds a side inset in portrait. Notched iPhones in landscape and every other device are left alone.
+The plugin acts when it finds a side inset in portrait, or in landscape on the unfolded Duo. Notched single-screen iPhones in landscape and every other device are left alone.
 
 ## Settings
 

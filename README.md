@@ -12,7 +12,7 @@ the toggle and the settings.
 
 bb pads its shell with Tailwind classes such as
 `pr-[env(safe-area-inset-right)]`. A content script measures the safe-area
-insets with a hidden probe. When it finds a portrait side inset (the rail), it
+insets with a hidden probe. When it finds a side inset in portrait, or in landscape on an unfolded Duo (the rail), it
 sets `data-bb-duo-rail` on `<html>`, and `data-bb-duo-rail-expanded` while
 expanded. In expanded mode a stylesheet drops the shell's side inset, gives
 the header row a margin equal to the rail, and shows an opaque cap over the

@@ -214,10 +214,18 @@ function detectRail(probe: HTMLElement): Side | null {
   const style = getComputedStyle(probe);
   const left = parseFloat(style.paddingLeft) || 0;
   const right = parseFloat(style.paddingRight) || 0;
-  // A notched iPhone only has side insets in landscape. A folded Duo has its
-  // rail beside the camera in portrait, so a side inset in portrait is the rail.
+  // A notched phone only gets side insets in landscape, so landscape is
+  // ignored there. The folded Duo's rail is a side inset in portrait. The
+  // unfolded Duo also keeps a rail when held sideways; it is recognised by a
+  // shorter screen or window side of at least 500pt, wider than any
+  // single-screen iPhone.
   const portrait = window.innerHeight > window.innerWidth;
-  if (!portrait || Math.max(left, right) < 1) return null;
+  const unfoldedDuo =
+    Math.max(
+      Math.min(window.screen.width, window.screen.height),
+      Math.min(window.innerWidth, window.innerHeight),
+    ) >= 500;
+  if ((!portrait && !unfoldedDuo) || Math.max(left, right) < 1) return null;
   return right >= left ? "right" : "left";
 }
 

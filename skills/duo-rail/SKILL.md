@@ -23,9 +23,10 @@ only the native bb app could hide it.
 
 ## Detection
 
-A rail is a left or right safe-area inset while the window is portrait. A
-notched iPhone in landscape is not treated as a rail. Nothing changes on
-devices without a rail.
+A rail is a left or right safe-area inset while the window is portrait, or
+in landscape on an unfolded Duo (shorter screen or window side of at least
+500pt). A notched single-screen iPhone in landscape is not treated as a
+rail. Nothing changes on devices without a rail.
 
 ## Toggle
 
