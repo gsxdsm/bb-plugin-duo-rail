@@ -3,13 +3,14 @@ import {
   chooseTopRowMode,
   CAMERA_ONLY_MAX_WIDTH,
   computeTopRow,
+  placeAboveRailBottom,
   placeInLeftRail,
   headerFitsTopRow,
   TOP_ROW_MIN_TITLE,
   isIOSWebKit,
   STATUS_GLYPH_ALLOWANCE,
   statusStartX,
-  isUnfoldedScreen,
+  isUnfoldedWindow,
   NativeRailController,
   placeRestoreInTopBand,
   RAIL_EXPANSION_CAPABILITY,
@@ -390,11 +391,17 @@ describe("focus zoom stopgap", () => {
 });
 
 describe("unfolded top row", () => {
-  it("detects the unfolded screen from the screen size only", () => {
-    expect(isUnfoldedScreen({ width: 466, height: 678 })).toBe(false); // folded cover
-    expect(isUnfoldedScreen({ width: 430, height: 932 })).toBe(false); // Pro Max
-    expect(isUnfoldedScreen({ width: 1000, height: 700 })).toBe(true);
-    expect(isUnfoldedScreen({ width: 700, height: 1000 })).toBe(true);
+  it("detects the unfolded screen from the window width (keyboard-proof)", () => {
+    expect(isUnfoldedWindow({ innerWidth: 466 })).toBe(false); // folded cover
+    expect(isUnfoldedWindow({ innerWidth: 430 })).toBe(false); // Pro Max
+    expect(isUnfoldedWindow({ innerWidth: 951 })).toBe(true); // unfolded wide
+    expect(isUnfoldedWindow({ innerWidth: 669 })).toBe(true); // unfolded tall
+  });
+
+  it("also accepts the app's top bar guide width as evidence", () => {
+    const guide = (width: number) => ({ edge: "none" as const, behavior: "disabled" as const, occlusions: [], topBar: { x: 16, y: 26, width, height: 44 } });
+    expect(isUnfoldedWindow({ innerWidth: 400 }, guide(791))).toBe(true);
+    expect(isUnfoldedWindow({ innerWidth: 466 }, guide(263.7))).toBe(false); // folded
   });
 
   it("puts Restore just left of the time, centred in the row, and reserves both", () => {
@@ -497,5 +504,18 @@ describe("measured iPhone Duo layouts (simulator, iOS 27.1, bar disabled)", () =
   it("on the user's unfolded screen with the sidebar open, title and menu go up, controls stay below", () => {
     // Time at 807 (guide), so the row ends at 799; row starts at 336; bb's controls 367; "…" 28.
     expect(chooseTopRowMode({ rowLeft: 336, rowEnd: 799, controlsWidth: 367, menuWidth: 28 })).toBe("split");
+  });
+});
+
+describe("placeAboveRailBottom", () => {
+  const icon = (y: number) => ({ x: 6, y, width: 36, height: 36 });
+  it("sits just above the rail's bottom control, centred on the rail", () => {
+    expect(placeAboveRailBottom({ railControls: [icon(0), icon(200), icon(620)], centreX: 24, size: 32 })).toEqual({ left: 8, top: 580 });
+  });
+  it("steps up past a control that would overlap", () => {
+    expect(placeAboveRailBottom({ railControls: [icon(0), icon(560), icon(620)], centreX: 24, size: 32 })).toEqual({ left: 8, top: 520 });
+  });
+  it("is null without rail controls", () => {
+    expect(placeAboveRailBottom({ railControls: [], centreX: 24, size: 32 })).toBeNull();
   });
 });

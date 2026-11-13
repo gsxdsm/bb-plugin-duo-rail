@@ -31,13 +31,15 @@ for where the time starts. Without it, it uses the left edge of the reported
 status pill; if only a small camera cut-out is reported, it leaves 160pt for
 the time and icons.
 
-On the unfolded screen, Restore sits at the top of the left side rail, over
-bb's sidebar toggle. bb's own thread header (title, its menu and controls)
-moves up into the status row and stops before the time. If the whole header
-doesn't fit there (for example with the sidebar open), only the title and its
-"…" menu move up, and bb's other controls stay on a line below the status
-band. If even those don't fit, bb's normal header stays below the band. "Unfolded" is decided from the screen
-size, so opening the keyboard can't switch layouts. When that band is too thin to hold the
+On the unfolded screen the layout follows Orca: the page uses the top of the
+screen. bb's thread header (title, its "…" menu and controls) and the sidebar's
+header share the clock's row, vertically centred on it, and stop before the
+time. If the whole header doesn't fit there (for example with the sidebar
+open), only the title and its menu stay in that row and bb's other controls
+drop to the line below. Restore sits in the left side rail just above
+settings, with a small 16px icon and a 36pt touch area. "Unfolded" means a
+window at least 600pt wide, or an app top bar guide at least 450pt wide.
+Opening the keyboard changes neither. When that band is too thin to hold the
 button (the unfolded screen), the button goes just below bb's header row at
 the right edge. The button stays after a page reload. The plugin restores the
 vertical bar when `mode` is `off` or the plugin is disabled or removed, but

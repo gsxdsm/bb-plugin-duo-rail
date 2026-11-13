@@ -35,9 +35,9 @@ import {
 import {
   chooseTopRowMode,
   computeTopRow,
-  placeInLeftRail,
   isIOSWebKit,
-  isUnfoldedScreen,
+  isUnfoldedWindow,
+  placeAboveRailBottom,
   NativeRailController,
   placeRestoreInTopBand,
   resolveRailSide,
@@ -84,8 +84,10 @@ const VAR_ROW_RESERVE = "--bb-duo-top-row-reserve";
 /** Split mode: the title group's width in the status row, and the header's two-line height. */
 const VAR_TITLE_WIDTH = "--bb-duo-top-row-title";
 const VAR_SPLIT_HEIGHT = "--bb-duo-top-row-split";
+/** Offset that vertically centres bb's normal-height rows (sidebar header, toggle) on the status row. */
+const VAR_ROW_OFFSET = "--bb-duo-top-row-offset";
 /** Restore in the top row matches bb's header icon buttons. */
-const ROW_TOGGLE_SIZE = 32;
+const ROW_TOGGLE_SIZE = 36;
 
 // ---------------------------------------------------------------------------
 // Store shared by the content script, the settings bridge and the action.
@@ -324,13 +326,22 @@ ${ON("left")} .bb-duo-cap { display: block; left: 0; width: env(safe-area-inset-
 body:has([role="dialog"]:not([data-state="closed"]), [role="alertdialog"]:not([data-state="closed"]), [data-vaul-drawer]:not([data-state="closed"])) :is(.bb-duo-toggle, .bb-duo-sidebar, .bb-duo-cap) { display: none !important; }
 :is(.bb-duo-toggle, .bb-duo-sidebar):active { background: var(--accent); }
 :is(.bb-duo-toggle, .bb-duo-sidebar):focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
-:is(.bb-duo-toggle, .bb-duo-sidebar) svg { width: 18px; height: 18px; }
+:is(.bb-duo-toggle, .bb-duo-sidebar) svg { width: var(--bb-duo-glyph, 18px); height: var(--bb-duo-glyph, 18px); }
 
 /* Unfolded with the status bar at the top: bb's thread header (title, its
    menu and controls) moves up into the status row and stops short of the
    time; the rest of the page starts below that row. The sidebar column keeps
    its own top inset. */
 html[${ATTR_TOP_ROW}] [data-app-content-shell] { padding-top: 0 !important; }
+/* The sidebar column uses the top too, its header centred on the status row
+   like the thread header (as in Orca). */
+html[${ATTR_TOP_ROW}] :is([data-sidebar="sidebar"], [data-sidebar="sidebar"] *)[class*="pt-[env(safe-area-inset-top)]"] {
+  padding-top: var(${VAR_ROW_OFFSET}, 0px) !important;
+}
+html[${ATTR_TOP_ROW}] :is([data-sidebar="sidebar"], [data-sidebar="sidebar"] *)[class*="-mt-[env(safe-area-inset-top)]"] {
+  margin-top: calc(-1 * var(${VAR_ROW_OFFSET}, 0px)) !important;
+}
+html[${ATTR_TOP_ROW}] [data-testid="app-sidebar-trigger-overlay"] { top: var(${VAR_ROW_OFFSET}, 0px) !important; }
 html[${ATTR_TOP_ROW}="full"] [data-app-content-shell] header:has([data-testid="app-page-header-content-row"]) {
   height: var(${VAR_ROW_HEIGHT}, var(--bb-app-chrome-row-height, 3rem)) !important;
   display: flex !important;
@@ -363,6 +374,7 @@ html[${ATTR_TOP_ROW}] .bb-duo-toggle,
 .bb-duo-toggle[data-compact] {
   width: ${ROW_TOGGLE_SIZE}px;
   height: ${ROW_TOGGLE_SIZE}px;
+  --bb-duo-glyph: 16px;
   border-radius: 8px;
   border-color: transparent;
   background: transparent;
@@ -536,23 +548,30 @@ function mountLayout({ signal }: { signal: AbortSignal }) {
   /** Centres the toggle in the rail, just below the camera block. */
   const clearTopRow = () => {
     root.removeAttribute(ATTR_TOP_ROW);
-    for (const name of [VAR_ROW_HEIGHT, VAR_ROW_RESERVE, VAR_TITLE_WIDTH, VAR_SPLIT_HEIGHT]) {
+    for (const name of [VAR_ROW_HEIGHT, VAR_ROW_RESERVE, VAR_TITLE_WIDTH, VAR_SPLIT_HEIGHT, VAR_ROW_OFFSET]) {
       root.style.removeProperty(name);
     }
   };
 
-  /** Restore's spot in the left side rail when unfolded and expanded natively, if there is room. */
+  /**
+   * Restore's spot in the left side rail when unfolded and expanded natively:
+   * centred on the rail, just above its bottom control (bb's settings).
+   */
   const leftRailSpot = (s: DuoState) => {
-    if (!s.nativeExpanded || !isUnfoldedScreen(window.screen)) return null;
+    if (!s.nativeExpanded || !isUnfoldedWindow(window, s.windowLayout)) return null;
     const trigger = document.querySelector<HTMLElement>(
       '[data-testid="app-sidebar-trigger-overlay"] [data-sidebar="trigger"]',
     );
-    const b = trigger?.getBoundingClientRect();
-    return placeInLeftRail({
-      insetTop: parseFloat(getComputedStyle(probe).paddingTop) || 0,
-      anchor: b && b.width > 0 ? { x: b.left, y: b.top, width: b.width, height: b.height } : null,
-      size: ROW_TOGGLE_SIZE,
-    });
+    const t = trigger?.getBoundingClientRect();
+    if (!t || t.width <= 0) return null;
+    const centreX = t.left + t.width / 2;
+    const railControls = Array.from(
+      document.querySelectorAll<HTMLElement>('[data-sidebar="sidebar"] button, [data-sidebar="sidebar"] a'),
+    )
+      .map((el) => el.getBoundingClientRect())
+      .filter((r) => r.width > 0 && Math.abs(r.left + r.width / 2 - centreX) <= 10)
+      .map((r) => ({ x: r.left, y: r.top, width: r.width, height: r.height }));
+    return placeAboveRailBottom({ railControls, centreX, size: ROW_TOGGLE_SIZE });
   };
 
   /**
@@ -562,7 +581,7 @@ function mountLayout({ signal }: { signal: AbortSignal }) {
    */
   const topRowGeometry = (s: DuoState) => {
     if (!s.nativeExpanded || s.mode === "off" || s.railSide === null) return null;
-    if (!isUnfoldedScreen(window.screen)) return null;
+    if (!isUnfoldedWindow(window, s.windowLayout)) return null;
     const row = document.querySelector<HTMLElement>('[data-testid="app-page-header-content-row"]');
     if (!row) return null;
     const insetTop = parseFloat(getComputedStyle(probe).paddingTop) || 0;
@@ -623,6 +642,10 @@ function mountLayout({ signal }: { signal: AbortSignal }) {
         root.style.setProperty(VAR_ROW_RESERVE, `${row.reserveRight}px`);
         root.style.setProperty(VAR_TITLE_WIDTH, `${row.titleWidth}px`);
         root.style.setProperty(VAR_SPLIT_HEIGHT, `${row.splitHeight}px`);
+        root.style.setProperty(
+          VAR_ROW_OFFSET,
+          `${Math.max(0, Math.round((row.rowHeight - chromeRowHeightPx(root)) / 2))}px`,
+        );
         toggle.style.left = `${row.toggle.left}px`;
         toggle.style.top = `${row.toggle.top}px`;
         return;

@@ -261,14 +261,25 @@ export function viewportWithoutFocusZoom(content: string): string | null {
 }
 
 /**
- * True on the unfolded Duo's inner screen. Uses the screen size only: the
- * keyboard shrinks the window, never the screen, so it can't flip this.
- * No single-screen iPhone has a shorter side of 500pt or more; the folded
- * cover screen is about 466pt.
+ * True on the unfolded Duo's inner screen, from the window width. The
+ * keyboard changes the window's height, never its width, so it can't flip
+ * this. In the bb WebView, `screen` doesn't reliably report the unfolded
+ * size, so it isn't used. Folded cover: 466pt wide; unfolded: 951 (wide) or
+ * 669 (tall).
  */
-export function isUnfoldedScreen(screen: { width: number; height: number }): boolean {
-  return Math.min(screen.width, screen.height) >= 500;
+export function isUnfoldedWindow(
+  window: { innerWidth: number },
+  layout?: WindowLayout | null,
+): boolean {
+  // The app's top bar guide is also keyboard-proof: ~791pt wide unfolded,
+  // ~264pt folded (measured).
+  const guide = layout?.topBar?.width ?? 0;
+  return window.innerWidth >= UNFOLDED_MIN_WIDTH || guide >= UNFOLDED_MIN_GUIDE_WIDTH;
 }
+
+export const UNFOLDED_MIN_GUIDE_WIDTH = 450;
+
+export const UNFOLDED_MIN_WIDTH = 600;
 
 /**
  * Geometry for the unfolded top row: bb's thread header moves up into the
@@ -374,4 +385,30 @@ export function chooseTopRowMode(input: {
   if (available >= input.controlsWidth + TOP_ROW_MIN_TITLE + gap) return "full";
   if (available >= input.menuWidth + TOP_ROW_MIN_TITLE + gap) return "split";
   return null;
+}
+
+/**
+ * Restore's spot in the left rail once the rail's top is in use: centred on
+ * the rail, just above its bottom-most control (bb's settings), moved up past
+ * any other rail control it would overlap.
+ */
+export function placeAboveRailBottom(input: {
+  /** Visible controls in the rail column. */
+  railControls: Rect[];
+  /** Horizontal centre of the rail. */
+  centreX: number;
+  size: number;
+  gap?: number;
+}): { left: number; top: number } | null {
+  const gap = input.gap ?? 8;
+  if (input.railControls.length === 0) return null;
+  const bottom = input.railControls.reduce((a, b) => (b.y > a.y ? b : a));
+  const left = Math.round(input.centreX - input.size / 2);
+  let top = Math.round(bottom.y - gap - input.size);
+  // Step up past any control in the way.
+  for (const r of [...input.railControls].sort((a, b) => b.y - a.y)) {
+    const hits = r.x < left + input.size && r.x + r.width > left && r.y < top + input.size && r.y + r.height > top;
+    if (hits) top = Math.round(r.y - gap - input.size);
+  }
+  return top >= 0 ? { left: Math.max(0, left), top } : null;
 }
