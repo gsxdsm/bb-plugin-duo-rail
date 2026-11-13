@@ -139,7 +139,8 @@ export function resolveRailSide(input: {
  * Where to put the Restore button once native expansion has moved the status
  * bar to the top. When the top safe-area band is tall enough (the folded
  * cover screen: about 82pt), the button sits inside it, vertically centred,
- * on whichever end is clear of the status pill and camera. When the band is
+ * right next to the status pill that holds the time (falling back to
+ * whichever end is clear of it). When the band is
  * too thin (e.g. the unfolded inner screen), it would land on bb's header
  * controls, so it goes just below the header row at the right end instead,
  * again avoiding any reported occlusion.
@@ -169,8 +170,28 @@ export function placeRestoreInTopBand(input: {
     );
   const leftEnd = margin;
   const rightEnd = input.viewportWidth - input.size - margin;
-  // In the band, prefer the left end (the pill is usually top right); below
-  // the header, prefer the right end, away from bb's sidebar control.
+  const fits = (left: number) =>
+    left >= margin && left <= rightEnd && !overlaps(left);
+  if (fitsBand) {
+    // Sit right next to the time: beside the status pill, the widest
+    // occlusion in the band, on its inner side (left of a pill at the top
+    // right, right of one at the top left).
+    const gap = 8;
+    const pill = input.occlusions
+      .filter((r) => r.y < input.insetTop && r.y + r.height > 0)
+      .sort((a, b) => b.width - a.width)[0];
+    if (pill) {
+      const pillOnRight = pill.x + pill.width / 2 > input.viewportWidth / 2;
+      const beside = pillOnRight
+        ? pill.x - gap - input.size
+        : pill.x + pill.width + gap;
+      if (fits(beside)) {
+        return { left: Math.round(beside), top, placement: "band" };
+      }
+    }
+  }
+  // Otherwise: in the band, prefer the left end; below the header, prefer the
+  // right end, away from bb's sidebar control.
   const [first, second] = fitsBand ? [leftEnd, rightEnd] : [rightEnd, leftEnd];
   const left = !overlaps(first) ? first : !overlaps(second) ? second : first;
   return { left: Math.round(left), top, placement: fitsBand ? "band" : "below-header" };

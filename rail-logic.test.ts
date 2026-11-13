@@ -262,20 +262,35 @@ describe("resolveRailSide", () => {
 });
 
 describe("placeRestoreInTopBand", () => {
-  it("centres in the top band on the end away from the status pill", () => {
+  it("sits right next to the time: just left of a top-right status pill", () => {
     // Simulator measurement with the bar off: 466pt wide, 82pt top band,
     // status pill 200×82 at the top right.
     const pill = { x: 266, y: 0, width: 200, height: 82 };
     expect(
       placeRestoreInTopBand({ insetTop: 82, viewportWidth: 466, occlusions: [pill], size: 36 }),
-    ).toEqual({ left: 12, top: 23, placement: "band" });
+    ).toEqual({ left: 222, top: 23, placement: "band" });
   });
 
-  it("moves to the right end when the left end is occluded", () => {
+  it("sits just right of a top-left status pill", () => {
     const pill = { x: 0, y: 0, width: 200, height: 82 };
     expect(
       placeRestoreInTopBand({ insetTop: 82, viewportWidth: 466, occlusions: [pill], size: 36 }),
-    ).toEqual({ left: 418, top: 23, placement: "band" });
+    ).toEqual({ left: 208, top: 23, placement: "band" });
+  });
+});
+
+describe("placeRestoreInTopBand fallbacks", () => {
+  it("uses the left end when no pill is reported", () => {
+    expect(
+      placeRestoreInTopBand({ insetTop: 82, viewportWidth: 466, occlusions: [], size: 36 }),
+    ).toEqual({ left: 12, top: 23, placement: "band" });
+  });
+
+  it("uses a free end when there is no room beside the pill", () => {
+    const pill = { x: 20, y: 0, width: 446, height: 82 };
+    expect(
+      placeRestoreInTopBand({ insetTop: 82, viewportWidth: 466, occlusions: [pill], size: 36 }).placement,
+    ).toBe("band");
   });
 });
 
