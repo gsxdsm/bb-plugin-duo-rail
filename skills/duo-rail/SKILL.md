@@ -30,7 +30,7 @@ the top band, clear of the status pill. When that band is too thin to hold the
 button (the unfolded screen), the button goes just below bb's header row at
 the right edge. The button stays after a page reload. The plugin restores the
 vertical bar when `mode` is `off` or the plugin is disabled or removed, but
-not when the page merely reloads. Requests are sent one at
+not when the page reloads or the plugin is reloaded or updated. Requests are sent one at
 a time, and rapid taps collapse to the last choice. If a request fails, the
 plugin falls back to the CSS expansion.
 

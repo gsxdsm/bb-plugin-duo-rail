@@ -366,6 +366,15 @@ function measureCameraBlock(
   return bottoms.length === 0 ? null : Math.ceil(Math.max(...bottoms));
 }
 
+/**
+ * Live content-script mounts in this page, shared across plugin bundle
+ * generations (a reload loads a new bundle, so module state is not shared).
+ */
+const liveMounts: { count: number } = ((window as unknown as Record<string, unknown>)
+  .__bbDuoRailLiveMounts ??= { count: 0 }) as { count: number };
+/** How long a disposed copy waits before restoring the vertical bar. */
+const RESTORE_GRACE_MS = 1500;
+
 /** bb's header row height in px, read from `--bb-app-chrome-row-height` (3rem today). */
 function chromeRowHeightPx(root: HTMLElement): number {
   const style = getComputedStyle(root);
@@ -392,6 +401,7 @@ function mountLayout({ signal }: { signal: AbortSignal }) {
       )
     : null;
   let lastSide = readLastSide();
+  liveMounts.count += 1;
   // A page reload or navigation also tears this script down. Only restore the
   // vertical bar for a real unload (plugin disabled or removed), not then.
   let pageGoingAway = false;
@@ -596,10 +606,13 @@ function mountLayout({ signal }: { signal: AbortSignal }) {
     // vertical bar if we turned it off. A reload or navigation also tears this
     // script down, sometimes before pagehide fires, so the restore waits a
     // tick: an unloading page never runs the timer, a disabled plugin does.
+    // A plugin reload or update unmounts this copy and mounts a new one at
+    // once, so the restore also waits until it is clear no copy is live.
+    liveMounts.count -= 1;
     if (controller !== null) {
       setTimeout(() => {
-        if (!pageGoingAway) void controller.dispose();
-      }, 0);
+        if (!pageGoingAway && liveMounts.count === 0) void controller.dispose();
+      }, RESTORE_GRACE_MS);
     }
     cancelAnimationFrame(frame);
     clearTimeout(settleTimer);
