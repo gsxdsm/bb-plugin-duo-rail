@@ -18,21 +18,28 @@ When the rail is expanded, the plugin:
 - covers the camera area with an opaque cap in the theme background, so the
   transcript scrolls under it instead of colliding with the status icons.
 
-The plugin cannot move or hide the iOS status bar. iOS draws it in the rail.
-The bb iOS app can: turn on **Status bar at top** in the app's Settings → This
-device → Cover screen. The app then hides the iOS status bar while folded and
-draws the time, battery and connection in a row across the top of the window.
-It tells the page with `data-bb-native-status-bar="shell-top"` and
-`--bb-native-status-row-height` on `<html>` (older bb web builds: through
-`window.bb.native.statusBar`). Duo Rail then only keeps the camera clear:
-the cap and toggle use `cameraHeight` instead of `cameraAreaHeight`.
+The plugin cannot move the iOS status bar. The bb iOS app can: **Status bar
+at top** in the app's Settings → This device → Cover screen turns the folded
+iPhone's vertical bar off (iOS 27.1). iOS then draws the status bar across the
+top and removes the rail, so bb's own layout uses the full width and keeps the
+header below the status bar. Duo Rail finds no rail and stands down: no cap,
+no buttons. The setting lives in the app, not in the plugin: it changes the
+system chrome for every screen of the app, and once it is on there is no rail
+for the plugin's button to sit in.
 
 ## Detection
 
-A rail is a left or right safe-area inset while the window is portrait, or
-in landscape on an unfolded Duo (shorter screen or window side of at least
-500pt). A notched single-screen iPhone in landscape is not treated as a
-rail. Nothing changes on devices without a rail.
+A bb iOS app that reports its window layout (`window.bb.native.windowLayout`)
+names the vertical bar directly: there is a rail while the bar has an edge and
+is not turned off, and its width is the side safe-area inset. The reported
+occlusions (camera, Live Activities, the status column) give the height of the
+block the cap covers.
+
+Older apps and browsers fall back to inset detection: a rail is a left or
+right safe-area inset while the window is portrait, or in landscape on an
+unfolded Duo (shorter screen or window side of at least 500pt). A notched
+single-screen iPhone in landscape is not treated as a rail. Nothing changes on
+devices without a rail.
 
 ## Toggle
 
@@ -55,9 +62,7 @@ Change these in Settings → Plugins → Duo Rail, or with `bb plugin config duo
   for the toggle; `off` never changes the layout.
 - `cameraAreaHeight`: height in points of the camera + status bar block at the
   top of the rail, 0–400, default 240. The cap covers it and the toggle sits
-  just below it.
-- `cameraHeight`: height in points of the camera alone, measured from the
-  top of the screen, 0–400, default 160. Used instead of `cameraAreaHeight`
-  while the bb app's status row is at the top.
+  just below it. Only a fallback: a bb iOS app that reports its window layout
+  measures the block itself.
 - `sideInset`: points kept clear on the rail side while expanded, 0–120,
   default 0.

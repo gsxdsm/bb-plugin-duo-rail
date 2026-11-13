@@ -24,17 +24,9 @@ export default async function plugin(bb: BbPluginApi) {
       type: "number",
       label: "Camera and status bar area height (pt)",
       description:
-        "Height of the block at the top of the rail that holds the camera and the iOS status bar. The header stays beside it, a cap covers it, and the toggle button sits just below it.",
+        "Height of the block at the top of the rail that holds the camera and the iOS status bar. The header stays beside it, a cap covers it, and the toggle button sits just below it. A bb iOS app that reports its window layout measures this block itself, and this value is only the fallback.",
       experimental_schema: z.number().int().min(0).max(400),
       default: 240,
-    },
-    cameraHeight: {
-      type: "number",
-      label: "Camera height with the status bar at top (pt)",
-      description:
-        "Used when the bb iOS app draws the status bar in a row across the top (This device > Cover screen > Status bar at top). Height of the camera pill at the top of the rail, measured from the top of the screen; the cap and toggle clear it.",
-      experimental_schema: z.number().int().min(0).max(400),
-      default: 160,
     },
     sideInset: {
       type: "number",

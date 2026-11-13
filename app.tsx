@@ -13,11 +13,13 @@
 // - a thread action ("Expand into rail" / "Restore side rail") that toggles
 //   the layout per device.
 //
-// When the bb iOS app draws the status bar in a row across the top of the
-// window (bb mobile: Settings > This device > Cover screen > Status bar at
-// top), the rail only holds the camera. The app says so on <html>
-// (data-bb-native-status-bar="shell-top" plus --bb-native-status-row-height)
-// and on window.bb.native.statusBar; the cap then shrinks to the camera.
+// The bb iOS app reports the window layout on window.bb.native.windowLayout:
+// the vertical bar's edge and behavior, and the system occlusions (camera,
+// status bar) in window points. With it, the rail comes from the vertical bar
+// itself and the cap covers exactly the occluded block at the top of the rail.
+// When the app's "Status bar at top" setting turns the vertical bar off, iOS
+// moves the status bar to the top and removes the rail, so the plugin stands
+// down. Older bb apps fall back to inset detection and cameraAreaHeight.
 import { useEffect, useSyncExternalStore } from "react";
 import {
   definePluginApp,
@@ -32,10 +34,10 @@ interface DuoState {
   mode: Mode;
   /** Height of the camera + status bar block at the top of the rail. */
   cameraAreaHeight: number;
-  /** Height of the camera alone, from the top of the screen. */
-  cameraHeight: number;
-  /** Height of the bb app's own status row above the page, or null when iOS draws the status bar in the rail. */
-  nativeStatusRow: number | null;
+  /** The window layout the bb app reports, or null for older apps and browsers. */
+  windowLayout: WindowLayout | null;
+  /** Bottom of the occluded block at the top of the rail, measured from the app's occlusions. */
+  measuredCameraBlock: number | null;
   /** Points kept clear on the rail side; 0 lets the chat fill the rail. */
   sideInset: number;
   /** The user's per-device choice; null follows the mode. */
@@ -45,9 +47,6 @@ interface DuoState {
 }
 
 const DEFAULT_CAMERA_AREA_HEIGHT = 240;
-const DEFAULT_CAMERA_HEIGHT = 160;
-const ATTR_NATIVE_STATUS = "data-bb-native-status-bar";
-const VAR_NATIVE_STATUS_ROW = "--bb-native-status-row-height";
 const TOGGLE_SIZE = 36;
 const ATTR_RAIL = "data-bb-duo-rail";
 const ATTR_EXPANDED = "data-bb-duo-rail-expanded";
@@ -60,8 +59,8 @@ const VAR_SIDE = "--bb-duo-side-inset";
 let state: DuoState = {
   mode: "auto",
   cameraAreaHeight: DEFAULT_CAMERA_AREA_HEIGHT,
-  cameraHeight: DEFAULT_CAMERA_HEIGHT,
-  nativeStatusRow: null,
+  windowLayout: null,
+  measuredCameraBlock: null,
   sideInset: 0,
   override: null,
   railSide: null,
@@ -74,8 +73,8 @@ function setState(patch: Partial<DuoState>) {
   if (
     next.mode === state.mode &&
     next.cameraAreaHeight === state.cameraAreaHeight &&
-    next.cameraHeight === state.cameraHeight &&
-    next.nativeStatusRow === state.nativeStatusRow &&
+    next.windowLayout === state.windowLayout &&
+    next.measuredCameraBlock === state.measuredCameraBlock &&
     next.sideInset === state.sideInset &&
     next.override === state.override &&
     next.railSide === state.railSide
@@ -95,14 +94,9 @@ function getState() {
   return state;
 }
 
-/**
- * The block to keep clear at the top of the rail, in page points. With the bb
- * app's status row on, the page starts below that row and only the camera is
- * left in the rail.
- */
+/** The block to keep clear at the top of the rail, in page points. */
 function railBlockHeight(s: DuoState): number {
-  if (s.nativeStatusRow === null) return s.cameraAreaHeight;
-  return Math.max(0, s.cameraHeight - s.nativeStatusRow);
+  return s.measuredCameraBlock ?? s.cameraAreaHeight;
 }
 
 /** The side to expand into, or null to leave bb's layout alone. */
@@ -140,14 +134,21 @@ function parseCameraAreaHeight(value: unknown): number {
     : DEFAULT_CAMERA_AREA_HEIGHT;
 }
 
-function parseCameraHeight(value: unknown): number {
-  return typeof value === "number" && Number.isFinite(value)
-    ? Math.min(400, Math.max(0, Math.round(value)))
-    : DEFAULT_CAMERA_HEIGHT;
+interface Rect {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+interface WindowLayout {
+  edge: "none" | "leading" | "trailing";
+  behavior: "automatic" | "disabled";
+  occlusions: Rect[];
 }
 
 interface NativeBridge {
-  statusBar?: unknown;
+  windowLayout?: unknown;
   subscribe?: (listener: (event: unknown) => void) => () => void;
 }
 
@@ -159,30 +160,32 @@ function nativeBridge(): NativeBridge | null {
     : null;
 }
 
-function statusRowHeight(statusBar: unknown): number | null {
-  if (typeof statusBar !== "object" || statusBar === null) return null;
-  const { placement, height } = statusBar as {
-    placement?: unknown;
-    height?: unknown;
-  };
-  return placement === "shell-top" &&
-    typeof height === "number" &&
-    Number.isFinite(height) &&
-    height > 0
-    ? height
-    : null;
+function isRect(value: unknown): value is Rect {
+  if (typeof value !== "object" || value === null) return false;
+  const r = value as Record<string, unknown>;
+  return ["x", "y", "width", "height"].every(
+    (key) => typeof r[key] === "number" && Number.isFinite(r[key]),
+  );
 }
 
-/** The bb app's status row height, from <html> or, on older bb web builds, the native bridge. */
-function readNativeStatusRow(): number | null {
-  const root = document.documentElement;
-  if (root.getAttribute(ATTR_NATIVE_STATUS) === "shell-top") {
-    const height = parseFloat(
-      getComputedStyle(root).getPropertyValue(VAR_NATIVE_STATUS_ROW),
-    );
-    return Number.isFinite(height) && height > 0 ? height : 0;
-  }
-  return statusRowHeight(nativeBridge()?.statusBar);
+/** The bb app's window layout, or null when the shell does not report one. */
+function readWindowLayout(): WindowLayout | null {
+  const raw = nativeBridge()?.windowLayout;
+  if (typeof raw !== "object" || raw === null) return null;
+  const { verticalBar, occlusions } = raw as {
+    verticalBar?: { edge?: unknown; behavior?: unknown };
+    occlusions?: unknown;
+  };
+  const edge = verticalBar?.edge;
+  const behavior = verticalBar?.behavior;
+  if (edge !== "none" && edge !== "leading" && edge !== "trailing") return null;
+  if (behavior !== "automatic" && behavior !== "disabled") return null;
+  if (!Array.isArray(occlusions)) return null;
+  return { edge, behavior, occlusions: occlusions.filter(isRect) };
+}
+
+function sameWindowLayout(a: WindowLayout | null, b: WindowLayout | null): boolean {
+  return JSON.stringify(a) === JSON.stringify(b);
 }
 
 function parseSideInset(value: unknown): number {
@@ -282,10 +285,17 @@ const ICON_RESTORE = `${SVG_OPEN}<polyline points="4 14 10 14 10 20"/><polyline 
 // ---------------------------------------------------------------------------
 // Rail detection: a hidden probe padded by every safe-area inset.
 
-function detectRail(probe: HTMLElement): Side | null {
+function detectRail(probe: HTMLElement, layout: WindowLayout | null): Side | null {
   const style = getComputedStyle(probe);
   const left = parseFloat(style.paddingLeft) || 0;
   const right = parseFloat(style.paddingRight) || 0;
+  if (Math.max(left, right) < 1) return null;
+  if (layout !== null) {
+    // The app reports the vertical bar itself. Turned off, iOS has moved the
+    // status bar to the top and there is no rail to expand into.
+    if (layout.behavior === "disabled" || layout.edge === "none") return null;
+    return right >= left ? "right" : "left";
+  }
   // A notched phone only gets side insets in landscape, so landscape is
   // ignored there. The folded Duo's rail is a side inset in portrait. The
   // unfolded Duo also keeps a rail when held sideways; it is recognised by a
@@ -297,8 +307,31 @@ function detectRail(probe: HTMLElement): Side | null {
       Math.min(window.screen.width, window.screen.height),
       Math.min(window.innerWidth, window.innerHeight),
     ) >= 500;
-  if ((!portrait && !unfoldedDuo) || Math.max(left, right) < 1) return null;
+  if (!portrait && !unfoldedDuo) return null;
   return right >= left ? "right" : "left";
+}
+
+/**
+ * The bottom of the occlusions in the upper half of the rail: the camera, Live
+ * Activities and the status bar column. Null without a reported layout.
+ */
+function measureCameraBlock(
+  probe: HTMLElement,
+  side: Side | null,
+  layout: WindowLayout | null,
+): number | null {
+  if (side === null || layout === null) return null;
+  const style = getComputedStyle(probe);
+  const rail = parseFloat(side === "right" ? style.paddingRight : style.paddingLeft) || 0;
+  const start = side === "right" ? window.innerWidth - rail : 0;
+  const end = start + rail;
+  const bottoms = layout.occlusions
+    .filter(
+      (r) =>
+        r.x < end && r.x + r.width > start && r.y < window.innerHeight / 2,
+    )
+    .map((r) => r.y + r.height);
+  return bottoms.length === 0 ? null : Math.ceil(Math.max(...bottoms));
 }
 
 function mountLayout({ signal }: { signal: AbortSignal }) {
@@ -405,12 +438,25 @@ function mountLayout({ signal }: { signal: AbortSignal }) {
     }
   };
 
+  const sync = () => {
+    const reported = readWindowLayout();
+    const windowLayout = sameWindowLayout(reported, getState().windowLayout)
+      ? getState().windowLayout
+      : reported;
+    const railSide = detectRail(probe, windowLayout);
+    setState({
+      windowLayout,
+      railSide,
+      measuredCameraBlock: measureCameraBlock(probe, railSide, windowLayout),
+    });
+  };
+
   let frame = 0;
   const measure = () => {
     cancelAnimationFrame(frame);
     // Insets settle a frame after a resize or rotation.
     frame = requestAnimationFrame(() => {
-      setState({ railSide: detectRail(probe) });
+      sync();
       placeToggle(getState());
     });
   };
@@ -424,28 +470,32 @@ function mountLayout({ signal }: { signal: AbortSignal }) {
   };
   window.addEventListener("storage", onStorage, { signal });
 
-  const syncNativeStatusRow = () => setState({ nativeStatusRow: readNativeStatusRow() });
-  const statusObserver = new MutationObserver(syncNativeStatusRow);
-  statusObserver.observe(root, {
-    attributes: true,
-    attributeFilter: [ATTR_NATIVE_STATUS, "style"],
-  });
+  // The probe is padded by the safe-area insets, so its border box changes
+  // whenever they do: when the app turns the vertical bar on or off, also while
+  // another screen covers the page and no resize event follows.
+  const insetObserver = new ResizeObserver(() => measure());
+  insetObserver.observe(probe, { box: "border-box" });
+  let settleTimer: ReturnType<typeof setTimeout> | undefined;
   const unsubscribeNative = nativeBridge()?.subscribe?.((event) => {
     if (
       typeof event === "object" &&
       event !== null &&
-      (event as { type?: unknown }).type === "status-bar"
+      (event as { type?: unknown }).type === "window-layout"
     ) {
-      syncNativeStatusRow();
+      measure();
+      // Safe-area insets can settle after the layout event arrives.
+      clearTimeout(settleTimer);
+      settleTimer = setTimeout(measure, 300);
     }
   });
 
-  setState({ railSide: detectRail(probe), nativeStatusRow: readNativeStatusRow() });
+  sync();
   apply();
 
   return () => {
     cancelAnimationFrame(frame);
-    statusObserver.disconnect();
+    clearTimeout(settleTimer);
+    insetObserver.disconnect();
     unsubscribeNative?.();
     unsubscribe();
     style.remove();
@@ -479,14 +529,12 @@ function SettingsBridge() {
     setState({
       mode: parseMode(values?.mode),
       cameraAreaHeight: parseCameraAreaHeight(values?.cameraAreaHeight),
-      cameraHeight: parseCameraHeight(values?.cameraHeight),
       sideInset: parseSideInset(values?.sideInset),
     });
   }, [
     isLoading,
     values?.mode,
     values?.cameraAreaHeight,
-    values?.cameraHeight,
     values?.sideInset,
   ]);
   return null;

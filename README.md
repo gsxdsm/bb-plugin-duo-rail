@@ -4,8 +4,9 @@ A bb plugin for the folded iPhone Duo. It expands the bb chat into the cover
 screen's side rail and keeps the header and other UI clear of the camera and
 the iOS status bar at the top of the rail. iOS still draws the status bar
 there; a web plugin cannot move it. The bb iOS app can (Settings → This device
-→ Cover screen → Status bar at top); with that on, Duo Rail only keeps the
-camera clear (`cameraHeight`, default 160).
+→ Cover screen → Status bar at top turns the vertical bar off); with that on
+there is no rail and Duo Rail stands down. Apps that report their window
+layout also give the plugin the exact camera and status block to cap.
 
 See [skills/duo-rail/SKILL.md](skills/duo-rail/SKILL.md) for detection,
 the toggle and the settings.
@@ -25,7 +26,7 @@ removes the style, probe, cap, button and attributes.
 ## Install
 
 ```
-bb plugin install git:https://github.com/gsxdsm/bb-plugin-duo-rail.git@^0.2.0
+bb plugin install git:https://github.com/gsxdsm/bb-plugin-duo-rail.git@^0.3.0
 ```
 
 ## Develop
