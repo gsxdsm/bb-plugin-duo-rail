@@ -28,6 +28,14 @@ export default async function plugin(bb: BbPluginApi) {
       experimental_schema: z.number().int().min(0).max(400),
       default: 240,
     },
+    cameraHeight: {
+      type: "number",
+      label: "Camera height with the status bar at top (pt)",
+      description:
+        "Used when the bb iOS app draws the status bar in a row across the top (This device > Cover screen > Status bar at top). Height of the camera pill at the top of the rail, measured from the top of the screen; the cap and toggle clear it.",
+      experimental_schema: z.number().int().min(0).max(400),
+      default: 160,
+    },
     sideInset: {
       type: "number",
       label: "Rail-side inset (pt)",

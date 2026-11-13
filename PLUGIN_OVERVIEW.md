@@ -12,6 +12,7 @@ The plugin acts when it finds a side inset in portrait, or in landscape on the u
 
 - **Mode**: Auto expands whenever a rail is found, Manual waits for the button, Off disables the plugin.
 - **Camera and status bar area height**: the block the cap covers and the buttons sit below. Default 240pt.
+- **Camera height with the status bar at top**: used instead of the area height while the bb iOS app shows the status bar in a row across the top. Default 160pt.
 - **Rail-side inset**: points to keep clear on the rail side while expanded. Default 0.
 
-iOS draws the status bar in the rail, and a plugin cannot move or hide it. The plugin keeps bb's interface out of that area instead.
+iOS draws the status bar in the rail, and a plugin cannot move or hide it. The bb iOS app can: turn on **Status bar at top** in its Settings → This device → Cover screen. Duo Rail notices and then only keeps the camera clear.

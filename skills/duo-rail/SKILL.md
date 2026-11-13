@@ -18,8 +18,14 @@ When the rail is expanded, the plugin:
 - covers the camera area with an opaque cap in the theme background, so the
   transcript scrolls under it instead of colliding with the status icons.
 
-The plugin cannot move or hide the iOS status bar. iOS draws it in the rail;
-only the native bb app could hide it.
+The plugin cannot move or hide the iOS status bar. iOS draws it in the rail.
+The bb iOS app can: turn on **Status bar at top** in the app's Settings → This
+device → Cover screen. The app then hides the iOS status bar while folded and
+draws the time, battery and connection in a row across the top of the window.
+It tells the page with `data-bb-native-status-bar="shell-top"` and
+`--bb-native-status-row-height` on `<html>` (older bb web builds: through
+`window.bb.native.statusBar`). Duo Rail then only keeps the camera clear:
+the cap and toggle use `cameraHeight` instead of `cameraAreaHeight`.
 
 ## Detection
 
@@ -50,5 +56,8 @@ Change these in Settings → Plugins → Duo Rail, or with `bb plugin config duo
 - `cameraAreaHeight`: height in points of the camera + status bar block at the
   top of the rail, 0–400, default 240. The cap covers it and the toggle sits
   just below it.
+- `cameraHeight`: height in points of the camera alone, measured from the
+  top of the screen, 0–400, default 160. Used instead of `cameraAreaHeight`
+  while the bb app's status row is at the top.
 - `sideInset`: points kept clear on the rail side while expanded, 0–120,
   default 0.

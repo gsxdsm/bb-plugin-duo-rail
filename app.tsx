@@ -12,6 +12,12 @@
 // - an app overlay that feeds plugin settings to that script;
 // - a thread action ("Expand into rail" / "Restore side rail") that toggles
 //   the layout per device.
+//
+// When the bb iOS app draws the status bar in a row across the top of the
+// window (bb mobile: Settings > This device > Cover screen > Status bar at
+// top), the rail only holds the camera. The app says so on <html>
+// (data-bb-native-status-bar="shell-top" plus --bb-native-status-row-height)
+// and on window.bb.native.statusBar; the cap then shrinks to the camera.
 import { useEffect, useSyncExternalStore } from "react";
 import {
   definePluginApp,
@@ -26,6 +32,10 @@ interface DuoState {
   mode: Mode;
   /** Height of the camera + status bar block at the top of the rail. */
   cameraAreaHeight: number;
+  /** Height of the camera alone, from the top of the screen. */
+  cameraHeight: number;
+  /** Height of the bb app's own status row above the page, or null when iOS draws the status bar in the rail. */
+  nativeStatusRow: number | null;
   /** Points kept clear on the rail side; 0 lets the chat fill the rail. */
   sideInset: number;
   /** The user's per-device choice; null follows the mode. */
@@ -35,6 +45,9 @@ interface DuoState {
 }
 
 const DEFAULT_CAMERA_AREA_HEIGHT = 240;
+const DEFAULT_CAMERA_HEIGHT = 160;
+const ATTR_NATIVE_STATUS = "data-bb-native-status-bar";
+const VAR_NATIVE_STATUS_ROW = "--bb-native-status-row-height";
 const TOGGLE_SIZE = 36;
 const ATTR_RAIL = "data-bb-duo-rail";
 const ATTR_EXPANDED = "data-bb-duo-rail-expanded";
@@ -47,6 +60,8 @@ const VAR_SIDE = "--bb-duo-side-inset";
 let state: DuoState = {
   mode: "auto",
   cameraAreaHeight: DEFAULT_CAMERA_AREA_HEIGHT,
+  cameraHeight: DEFAULT_CAMERA_HEIGHT,
+  nativeStatusRow: null,
   sideInset: 0,
   override: null,
   railSide: null,
@@ -59,6 +74,8 @@ function setState(patch: Partial<DuoState>) {
   if (
     next.mode === state.mode &&
     next.cameraAreaHeight === state.cameraAreaHeight &&
+    next.cameraHeight === state.cameraHeight &&
+    next.nativeStatusRow === state.nativeStatusRow &&
     next.sideInset === state.sideInset &&
     next.override === state.override &&
     next.railSide === state.railSide
@@ -76,6 +93,16 @@ function subscribe(listener: () => void) {
 
 function getState() {
   return state;
+}
+
+/**
+ * The block to keep clear at the top of the rail, in page points. With the bb
+ * app's status row on, the page starts below that row and only the camera is
+ * left in the rail.
+ */
+function railBlockHeight(s: DuoState): number {
+  if (s.nativeStatusRow === null) return s.cameraAreaHeight;
+  return Math.max(0, s.cameraHeight - s.nativeStatusRow);
 }
 
 /** The side to expand into, or null to leave bb's layout alone. */
@@ -111,6 +138,51 @@ function parseCameraAreaHeight(value: unknown): number {
   return typeof value === "number" && Number.isFinite(value)
     ? Math.min(400, Math.max(0, Math.round(value)))
     : DEFAULT_CAMERA_AREA_HEIGHT;
+}
+
+function parseCameraHeight(value: unknown): number {
+  return typeof value === "number" && Number.isFinite(value)
+    ? Math.min(400, Math.max(0, Math.round(value)))
+    : DEFAULT_CAMERA_HEIGHT;
+}
+
+interface NativeBridge {
+  statusBar?: unknown;
+  subscribe?: (listener: (event: unknown) => void) => () => void;
+}
+
+function nativeBridge(): NativeBridge | null {
+  const root = (window as unknown as { bb?: { native?: unknown } }).bb;
+  const native = root?.native;
+  return typeof native === "object" && native !== null
+    ? (native as NativeBridge)
+    : null;
+}
+
+function statusRowHeight(statusBar: unknown): number | null {
+  if (typeof statusBar !== "object" || statusBar === null) return null;
+  const { placement, height } = statusBar as {
+    placement?: unknown;
+    height?: unknown;
+  };
+  return placement === "shell-top" &&
+    typeof height === "number" &&
+    Number.isFinite(height) &&
+    height > 0
+    ? height
+    : null;
+}
+
+/** The bb app's status row height, from <html> or, on older bb web builds, the native bridge. */
+function readNativeStatusRow(): number | null {
+  const root = document.documentElement;
+  if (root.getAttribute(ATTR_NATIVE_STATUS) === "shell-top") {
+    const height = parseFloat(
+      getComputedStyle(root).getPropertyValue(VAR_NATIVE_STATUS_ROW),
+    );
+    return Number.isFinite(height) && height > 0 ? height : 0;
+  }
+  return statusRowHeight(nativeBridge()?.statusBar);
 }
 
 function parseSideInset(value: unknown): number {
@@ -294,7 +366,7 @@ function mountLayout({ signal }: { signal: AbortSignal }) {
     const probeStyle = getComputedStyle(probe);
     const rail =
       parseFloat(s.railSide === "right" ? probeStyle.paddingRight : probeStyle.paddingLeft) || 0;
-    const top = Math.max(parseFloat(probeStyle.paddingTop) || 0, s.cameraAreaHeight) + 12;
+    const top = Math.max(parseFloat(probeStyle.paddingTop) || 0, railBlockHeight(s)) + 12;
     const centre = s.railSide === "right" ? window.innerWidth - rail / 2 - 6 : rail / 2 + 6;
     const left = Math.min(
       Math.max(4, centre - TOGGLE_SIZE / 2),
@@ -315,7 +387,7 @@ function mountLayout({ signal }: { signal: AbortSignal }) {
     const side = expandedSide(s);
     if (side) root.setAttribute(ATTR_EXPANDED, side);
     else root.removeAttribute(ATTR_EXPANDED);
-    root.style.setProperty(VAR_CAMERA, `${s.cameraAreaHeight}px`);
+    root.style.setProperty(VAR_CAMERA, `${railBlockHeight(s)}px`);
     root.style.setProperty(VAR_SIDE, `${s.sideInset}px`);
 
     toggle.hidden = s.railSide === null || s.mode === "off";
@@ -352,11 +424,29 @@ function mountLayout({ signal }: { signal: AbortSignal }) {
   };
   window.addEventListener("storage", onStorage, { signal });
 
-  setState({ railSide: detectRail(probe) });
+  const syncNativeStatusRow = () => setState({ nativeStatusRow: readNativeStatusRow() });
+  const statusObserver = new MutationObserver(syncNativeStatusRow);
+  statusObserver.observe(root, {
+    attributes: true,
+    attributeFilter: [ATTR_NATIVE_STATUS, "style"],
+  });
+  const unsubscribeNative = nativeBridge()?.subscribe?.((event) => {
+    if (
+      typeof event === "object" &&
+      event !== null &&
+      (event as { type?: unknown }).type === "status-bar"
+    ) {
+      syncNativeStatusRow();
+    }
+  });
+
+  setState({ railSide: detectRail(probe), nativeStatusRow: readNativeStatusRow() });
   apply();
 
   return () => {
     cancelAnimationFrame(frame);
+    statusObserver.disconnect();
+    unsubscribeNative?.();
     unsubscribe();
     style.remove();
     probe.remove();
@@ -389,9 +479,16 @@ function SettingsBridge() {
     setState({
       mode: parseMode(values?.mode),
       cameraAreaHeight: parseCameraAreaHeight(values?.cameraAreaHeight),
+      cameraHeight: parseCameraHeight(values?.cameraHeight),
       sideInset: parseSideInset(values?.sideInset),
     });
-  }, [isLoading, values?.mode, values?.cameraAreaHeight, values?.sideInset]);
+  }, [
+    isLoading,
+    values?.mode,
+    values?.cameraAreaHeight,
+    values?.cameraHeight,
+    values?.sideInset,
+  ]);
   return null;
 }
 
