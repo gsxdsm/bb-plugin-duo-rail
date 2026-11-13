@@ -61,6 +61,16 @@ It clicks bb's own sidebar trigger, since the plugin SDK has no sidebar API.
 It is hidden while expanded, when `mode` is `off`, and while the sidebar or any
 other sheet or dialog is open.
 
+## Focus-zoom stopgap
+
+On iOS WebKit the plugin adds `maximum-scale=1` to the page's viewport (unless
+it already sets one) and restores it when unloaded. This applies whatever the
+`mode`, on every iOS device. It stops iOS zooming in whenever a field gets
+focus on wide screens such as the unfolded Duo. bb only sizes fields to 16px
+below 768pt, and while zoomed, bb's layout stops following the keyboard.
+Trade-off: inside the bb iOS app it usually also disables pinch-to-zoom on
+the page. Remove it once get-bb/bb#7511 ships.
+
 ## Settings
 
 Change these in Settings → Plugins → Duo Rail, or with `bb plugin config duo-rail set <key> <value>`:

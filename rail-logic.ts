@@ -153,3 +153,29 @@ export function placeRestoreInTopBand(input: {
   const left = !overlaps(leftEnd) ? leftEnd : !overlaps(rightEnd) ? rightEnd : leftEnd;
   return { left: Math.round(left), top };
 }
+
+/** The navigator fields that tell an iOS WebKit page apart (iPadOS reports MacIntel with touch). */
+export interface BrowserPlatform {
+  userAgent: string;
+  platform: string;
+  maxTouchPoints: number;
+}
+
+export function isIOSWebKit({ userAgent, platform, maxTouchPoints }: BrowserPlatform): boolean {
+  const isAppleWebKit = /\bAppleWebKit\//u.test(userAgent);
+  const isIOSDevice =
+    /\b(?:iPad|iPhone|iPod)\b/u.test(userAgent) || (platform === "MacIntel" && maxTouchPoints > 1);
+  return isAppleWebKit && isIOSDevice;
+}
+
+/**
+ * The viewport content with `maximum-scale=1` added, or null when it already
+ * sets a maximum scale. iOS zooms the page in when a field under 16px gets
+ * focus; bb only sizes fields to 16px below 768pt, so an unfolded Duo zooms
+ * on every focus and the composer then stays behind the keyboard. A maximum
+ * scale of 1 stops that zoom. Stopgap until get-bb/bb#7511 ships.
+ */
+export function viewportWithoutFocusZoom(content: string): string | null {
+  if (/\bmaximum-scale\s*=/u.test(content)) return null;
+  return content.trim() ? `${content}, maximum-scale=1` : "maximum-scale=1";
+}

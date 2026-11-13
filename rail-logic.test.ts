@@ -1,11 +1,13 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  isIOSWebKit,
   NativeRailController,
   placeRestoreInTopBand,
   RAIL_EXPANSION_CAPABILITY,
   resolveRailSide,
   SET_RAIL_EXPANDED,
   supportsNativeRailExpansion,
+  viewportWithoutFocusZoom,
 } from "./rail-logic";
 
 /** A fake native bridge whose requests resolve when the test says so. */
@@ -213,5 +215,32 @@ describe("placeRestoreInTopBand", () => {
     expect(
       placeRestoreInTopBand({ insetTop: 82, viewportWidth: 466, occlusions: [pill], size: 36 }),
     ).toEqual({ left: 418, top: 23 });
+  });
+});
+
+describe("focus zoom stopgap", () => {
+  const IPHONE = {
+    userAgent:
+      "Mozilla/5.0 (iPhone; CPU iPhone OS 27_1 like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148",
+    platform: "iPhone",
+    maxTouchPoints: 5,
+  };
+  const ANDROID = {
+    userAgent:
+      "Mozilla/5.0 (Linux; Android 15) AppleWebKit/537.36 Chrome/140.0.0.0 Mobile Safari/537.36",
+    platform: "Linux armv8l",
+    maxTouchPoints: 5,
+  };
+
+  it("recognizes iOS WebKit only", () => {
+    expect(isIOSWebKit(IPHONE)).toBe(true);
+    expect(isIOSWebKit(ANDROID)).toBe(false);
+  });
+
+  it("adds maximum-scale=1 once", () => {
+    const content = "width=device-width, initial-scale=1.0, viewport-fit=cover";
+    const capped = viewportWithoutFocusZoom(content);
+    expect(capped).toBe(`${content}, maximum-scale=1`);
+    expect(viewportWithoutFocusZoom(capped!)).toBeNull();
   });
 });

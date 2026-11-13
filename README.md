@@ -11,6 +11,10 @@ status bar stays in the rail.
 See [skills/duo-rail/SKILL.md](skills/duo-rail/SKILL.md) for detection,
 the toggle and the settings.
 
+It also carries a stopgap for iOS zooming in on field focus on wide screens
+(adds `maximum-scale=1` on iOS WebKit, which usually also disables pinch-to-zoom
+in the bb iOS app) until get-bb/bb#7511 ships.
+
 ## How it works
 
 bb pads its shell with Tailwind classes such as

@@ -33,6 +33,7 @@ import {
   useSettings,
 } from "@get-bb/plugin-sdk/app";
 import {
+  isIOSWebKit,
   NativeRailController,
   placeRestoreInTopBand,
   resolveRailSide,
@@ -40,6 +41,7 @@ import {
   type Rect,
   type Side,
   type WindowLayout,
+  viewportWithoutFocusZoom,
 } from "./rail-logic";
 
 type Mode = "auto" | "manual" | "off";
@@ -625,10 +627,30 @@ function useDuoState() {
   return useSyncExternalStore(subscribe, getState, getState);
 }
 
+// Stops iOS zooming in when a field gets focus on wide screens (an unfolded
+// Duo). Independent of the rail and of `mode`. Restores the viewport on unload.
+function mountFocusZoomGuard() {
+  if (!isIOSWebKit(navigator)) return;
+  const viewport = document.querySelector<HTMLMetaElement>('meta[name="viewport"]');
+  if (!viewport) return;
+  const original = viewport.content;
+  const capped = viewportWithoutFocusZoom(original);
+  if (capped === null) return;
+  viewport.content = capped;
+  return () => {
+    if (viewport.content === capped) viewport.content = original;
+  };
+}
+
 export default definePluginApp((app) => {
   app.contentScripts.register({
     id: "duo-rail-layout",
     mount: mountLayout,
+  });
+
+  app.contentScripts.register({
+    id: "duo-rail-focus-zoom",
+    mount: mountFocusZoomGuard,
   });
 
   app.slots.experimental_appOverlay({
