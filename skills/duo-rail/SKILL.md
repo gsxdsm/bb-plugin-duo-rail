@@ -18,14 +18,21 @@ When the rail is expanded, the plugin:
 - covers the camera area with an opaque cap in the theme background, so the
   transcript scrolls under it instead of colliding with the status icons.
 
-The plugin cannot move the iOS status bar. The bb iOS app can: **Status bar
-at top** in the app's Settings → This device → Cover screen turns the folded
-iPhone's vertical bar off (iOS 27.1). iOS then draws the status bar across the
-top and removes the rail, so bb's own layout uses the full width and keeps the
-header below the status bar. Duo Rail finds no rail and stands down: no cap,
-no buttons. The setting lives in the app, not in the plugin: it changes the
-system chrome for every screen of the app, and once it is on there is no rail
-for the plugin's button to sit in.
+With a bb iOS app that supports native rail expansion (it advertises the
+`rail-expansion` capability; iOS 27.1+), expanding goes further: the plugin
+asks the app (`set-rail-expanded`) to turn the folded iPhone's vertical bar
+off. iOS then draws the status bar across the top and removes the rail inset,
+so bb uses the full width with its header below the status bar. Restore turns
+the vertical bar back on. There is no separate app setting: the plugin's
+expand/restore choice is the only switch, saved per device. The plugin keeps
+track of the rail side while the inset is gone, shows the Restore button in
+the top band clear of the status pill, and restores the vertical bar when
+`mode` is `off` or the plugin is disabled or unloaded. Requests are sent one at
+a time, and rapid taps collapse to the last choice. If a request fails, the
+plugin falls back to the CSS expansion.
+
+Older apps and browsers keep the CSS expansion above; the iOS status bar stays
+in the rail there.
 
 ## Detection
 

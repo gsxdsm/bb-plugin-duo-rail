@@ -20,15 +20,29 @@
 // When the app's "Status bar at top" setting turns the vertical bar off, iOS
 // moves the status bar to the top and removes the rail, so the plugin stands
 // down. Older bb apps fall back to inset detection and cameraAreaHeight.
+//
+// Apps that advertise the "rail-expansion" capability expand natively: the
+// expand/restore controls send `set-rail-expanded`, the app turns the vertical
+// bar off (status bar to the top, rail inset removed) or back on, and the CSS
+// expansion is not used. The plugin keeps the rail side while the inset is
+// gone, shows Restore in the top band, and restores native on Off or unload.
 import { useEffect, useSyncExternalStore } from "react";
 import {
   definePluginApp,
   experimental_usePluginId,
   useSettings,
 } from "@get-bb/plugin-sdk/app";
+import {
+  NativeRailController,
+  placeRestoreInTopBand,
+  resolveRailSide,
+  supportsNativeRailExpansion,
+  type Rect,
+  type Side,
+  type WindowLayout,
+} from "./rail-logic";
 
 type Mode = "auto" | "manual" | "off";
-type Side = "left" | "right";
 
 interface DuoState {
   mode: Mode;
@@ -44,6 +58,10 @@ interface DuoState {
   override: boolean | null;
   /** The side the rail is on, or null when no rail is detected. */
   railSide: Side | null;
+  /** The app has the vertical bar off (status bar at the top) at our request. */
+  nativeExpanded: boolean;
+  /** Native expansion failed; fall back to the CSS expansion. */
+  nativeFailed: boolean;
 }
 
 const DEFAULT_CAMERA_AREA_HEIGHT = 240;
@@ -64,6 +82,8 @@ let state: DuoState = {
   sideInset: 0,
   override: null,
   railSide: null,
+  nativeExpanded: false,
+  nativeFailed: false,
 };
 const listeners = new Set<() => void>();
 let overrideKey = "bb-plugin:duo-rail:expanded";
@@ -77,7 +97,9 @@ function setState(patch: Partial<DuoState>) {
     next.measuredCameraBlock === state.measuredCameraBlock &&
     next.sideInset === state.sideInset &&
     next.override === state.override &&
-    next.railSide === state.railSide
+    next.railSide === state.railSide &&
+    next.nativeExpanded === state.nativeExpanded &&
+    next.nativeFailed === state.nativeFailed
   ) {
     return;
   }
@@ -134,22 +156,30 @@ function parseCameraAreaHeight(value: unknown): number {
     : DEFAULT_CAMERA_AREA_HEIGHT;
 }
 
-interface Rect {
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-}
-
-interface WindowLayout {
-  edge: "none" | "leading" | "trailing";
-  behavior: "automatic" | "disabled";
-  occlusions: Rect[];
-}
-
 interface NativeBridge {
   windowLayout?: unknown;
+  capabilities?: unknown;
+  request?: (kind: string, payload: unknown) => Promise<unknown>;
   subscribe?: (listener: (event: unknown) => void) => () => void;
+}
+
+const LAST_SIDE_KEY = "bb-plugin:duo-rail:last-side";
+
+function readLastSide(): Side | null {
+  try {
+    const raw = window.localStorage.getItem(LAST_SIDE_KEY);
+    return raw === "left" || raw === "right" ? raw : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeLastSide(side: Side) {
+  try {
+    window.localStorage.setItem(LAST_SIDE_KEY, side);
+  } catch {
+    // Storage disabled: the side is still kept for this session.
+  }
 }
 
 function nativeBridge(): NativeBridge | null {
@@ -337,6 +367,21 @@ function measureCameraBlock(
 function mountLayout({ signal }: { signal: AbortSignal }) {
   const root = document.documentElement;
 
+  const native = nativeBridge();
+  const nativeSupported = supportsNativeRailExpansion(native);
+  const initialLayout = readWindowLayout();
+  const controller = supportsNativeRailExpansion(native)
+    ? new NativeRailController(
+        native,
+        initialLayout === null ? null : initialLayout.behavior === "disabled",
+        (error) => {
+          console.warn("[duo-rail] set-rail-expanded failed; using CSS expansion", error);
+          setState({ nativeFailed: true });
+        },
+      )
+    : null;
+  let lastSide = readLastSide();
+
   const style = document.createElement("style");
   style.setAttribute("data-bb-plugin", "duo-rail");
   style.textContent = CSS;
@@ -397,6 +442,19 @@ function mountLayout({ signal }: { signal: AbortSignal }) {
   const placeToggle = (s: DuoState) => {
     if (s.railSide === null) return;
     const probeStyle = getComputedStyle(probe);
+    if (s.nativeExpanded) {
+      // The status bar is at the top now: Restore sits in the top band, clear
+      // of the status pill and camera.
+      const spot = placeRestoreInTopBand({
+        insetTop: parseFloat(probeStyle.paddingTop) || 0,
+        viewportWidth: window.innerWidth,
+        occlusions: s.windowLayout?.occlusions ?? [],
+        size: TOGGLE_SIZE,
+      });
+      toggle.style.left = `${spot.left}px`;
+      toggle.style.top = `${spot.top}px`;
+      return;
+    }
     const rail =
       parseFloat(s.railSide === "right" ? probeStyle.paddingRight : probeStyle.paddingLeft) || 0;
     const top = Math.max(parseFloat(probeStyle.paddingTop) || 0, railBlockHeight(s)) + 12;
@@ -418,7 +476,14 @@ function mountLayout({ signal }: { signal: AbortSignal }) {
     if (s.railSide && s.mode !== "off") root.setAttribute(ATTR_RAIL, s.railSide);
     else root.removeAttribute(ATTR_RAIL);
     const side = expandedSide(s);
-    if (side) root.setAttribute(ATTR_EXPANDED, side);
+    const useNative = controller !== null && !s.nativeFailed;
+    if (controller !== null && s.railSide !== null) {
+      // Off restores native; otherwise native follows expand / restore.
+      void controller.set(s.mode !== "off" && side !== null);
+    }
+    // Natively the app removes the rail inset itself; CSS expansion is the
+    // fallback for older apps and browsers.
+    if (side && !useNative) root.setAttribute(ATTR_EXPANDED, side);
     else root.removeAttribute(ATTR_EXPANDED);
     root.style.setProperty(VAR_CAMERA, `${railBlockHeight(s)}px`);
     root.style.setProperty(VAR_SIDE, `${s.sideInset}px`);
@@ -443,11 +508,25 @@ function mountLayout({ signal }: { signal: AbortSignal }) {
     const windowLayout = sameWindowLayout(reported, getState().windowLayout)
       ? getState().windowLayout
       : reported;
-    const railSide = detectRail(probe, windowLayout);
+    const detected = detectRail(probe, windowLayout);
+    if (detected !== null && detected !== lastSide) {
+      lastSide = detected;
+      writeLastSide(detected);
+    }
+    const nativeExpanded =
+      nativeSupported && windowLayout?.behavior === "disabled";
+    if (windowLayout !== null) controller?.observe(windowLayout.behavior === "disabled");
+    const railSide = resolveRailSide({
+      detected,
+      layout: windowLayout,
+      nativeSupported,
+      lastKnown: lastSide,
+    });
     setState({
       windowLayout,
       railSide,
-      measuredCameraBlock: measureCameraBlock(probe, railSide, windowLayout),
+      nativeExpanded,
+      measuredCameraBlock: measureCameraBlock(probe, detected, windowLayout),
     });
   };
 
@@ -493,6 +572,8 @@ function mountLayout({ signal }: { signal: AbortSignal }) {
   apply();
 
   return () => {
+    // Leave the app as we found it: restore the vertical bar if we turned it off.
+    void controller?.dispose();
     cancelAnimationFrame(frame);
     clearTimeout(settleTimer);
     insetObserver.disconnect();

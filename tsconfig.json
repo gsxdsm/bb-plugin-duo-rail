@@ -17,6 +17,8 @@
   },
   "include": [
     "server.ts",
-    "app.tsx"
+    "app.tsx",
+    "rail-logic.ts",
+    "rail-logic.test.ts"
   ]
 }

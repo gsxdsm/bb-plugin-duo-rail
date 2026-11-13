@@ -14,4 +14,4 @@ The plugin acts when it finds a side inset in portrait, or in landscape on the u
 - **Camera and status bar area height**: the block the cap covers and the buttons sit below. Default 240pt.
 - **Rail-side inset**: points to keep clear on the rail side while expanded. Default 0.
 
-iOS draws the status bar in the rail, and a plugin cannot move it. The bb iOS app can: **Status bar at top** in its Settings → This device → Cover screen moves the status bar to the top and gives the app the full width. There is no rail then, so Duo Rail stands down. When the app reports its window layout, the cap covers exactly the camera and status block it measures instead of the configured height.
+With a bb iOS app that supports native rail expansion (iOS 27.1 or later), expanding also moves the status bar to the top of the window and gives bb the full width; Restore puts it back in the rail. Older apps keep the status bar in the rail, and the plugin keeps bb's interface clear of it.

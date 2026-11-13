@@ -1,6 +1,6 @@
 {
   "name": "bb-plugin-duo-rail",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Expands the bb chat into the folded iPhone Duo side rail while keeping UI clear of the camera and status bar.",
   "license": "Apache-2.0",
   "repository": {
@@ -35,6 +35,10 @@
     "@types/react-dom": "^19.0.0",
     "cron-parser": "^5.10.5",
     "hono": "^4.13.18",
-    "typescript": "^5.7.0"
+    "typescript": "^5.7.0",
+    "vitest": "^3.2.7"
+  },
+  "scripts": {
+    "test": "vitest run"
   }
 }
