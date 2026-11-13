@@ -10,8 +10,6 @@
 // Pieces:
 // - a content script that detects the rail and owns every DOM change;
 // - an app overlay that feeds plugin settings to that script;
-// - a thread action ("Expand into rail" / "Restore side rail") that toggles
-//   the layout per device.
 //
 // The bb iOS app reports the window layout on window.bb.native.windowLayout:
 // the vertical bar's edge and behavior, and the system occlusions (camera,
@@ -26,7 +24,7 @@
 // bar off (status bar to the top, rail inset removed) or back on, and the CSS
 // expansion is not used. The plugin keeps the rail side while the inset is
 // gone, shows Restore in the top band, and restores native on Off or unload.
-import { useEffect, useSyncExternalStore } from "react";
+import { useEffect } from "react";
 import {
   definePluginApp,
   experimental_usePluginId,
@@ -1117,10 +1115,6 @@ function SettingsBridge() {
   return null;
 }
 
-function useDuoState() {
-  return useSyncExternalStore(subscribe, getState, getState);
-}
-
 // Stops iOS zooming in when a field gets focus on wide screens (an unfolded
 // Duo). Independent of the rail and of `mode`. Restores the viewport on unload.
 function mountFocusZoomGuard() {
@@ -1152,21 +1146,4 @@ export default definePluginApp((app) => {
     component: SettingsBridge,
   });
 
-  app.slots.experimental_threadAction({
-    id: "duo-rail-toggle",
-    title: "Expand into side rail",
-    icon: "Maximize2",
-    group: "duo-rail",
-    placement: "header",
-    useData: () => useDuoState(),
-    item: ({ data }) => {
-      if (data.railSide === null || data.mode === "off") return null;
-      const expanded = expandedSide(data) !== null;
-      return {
-        label: expanded ? "Restore side rail" : "Expand into rail",
-        icon: expanded ? "Minimize2" : "Maximize2",
-        run: () => writeOverride(!expanded),
-      };
-    },
-  });
 });

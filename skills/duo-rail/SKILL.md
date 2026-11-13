@@ -73,10 +73,9 @@ devices without a rail.
 
 ## Toggle
 
-A round toggle button sits in the rail, centred, just below the camera area,
-in both states. Tap it to expand or restore. The open thread's menu also has
-**Expand into rail** / **Restore side rail**. The choice is stored per device
-in localStorage. The button is hidden when no rail is detected, when `mode` is
+A small round icon button toggles the layout: it expands into the rail or
+restores it. Where it sits depends on the screen (see above). The choice is
+stored per device in localStorage. The button is hidden when no rail is detected, when `mode` is
 `off`, and while a bb sheet or dialog is open.
 
 While the rail is not expanded, a second button below it opens bb's sidebar.
