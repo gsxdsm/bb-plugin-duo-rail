@@ -3,10 +3,9 @@ import {
   chooseTopRowMode,
   CAMERA_ONLY_MAX_WIDTH,
   computeTopRow,
-  keyboardLikelyUp,
+  stepKeyboardFreeze,
   reachesStatus,
   statusBottom,
-  placeAboveRailBottom,
   placeInLeftRail,
   headerFitsTopRow,
   TOP_ROW_MIN_TITLE,
@@ -510,19 +509,6 @@ describe("measured iPhone Duo layouts (simulator, iOS 27.1, bar disabled)", () =
   });
 });
 
-describe("placeAboveRailBottom", () => {
-  const icon = (y: number) => ({ x: 6, y, width: 36, height: 36 });
-  it("sits just above the rail's bottom control, centred on the rail", () => {
-    expect(placeAboveRailBottom({ railControls: [icon(0), icon(200), icon(620)], centreX: 24, size: 32 })).toEqual({ left: 8, top: 580 });
-  });
-  it("steps up past a control that would overlap", () => {
-    expect(placeAboveRailBottom({ railControls: [icon(0), icon(560), icon(620)], centreX: 24, size: 32 })).toEqual({ left: 8, top: 520 });
-  });
-  it("is null without rail controls", () => {
-    expect(placeAboveRailBottom({ railControls: [], centreX: 24, size: 32 })).toBeNull();
-  });
-});
-
 describe("right panel and header clearance", () => {
   it("measures the status region's bottom from the pill", () => {
     expect(statusBottom({ occlusions: [{ x: 807, y: 0, width: 144, height: 82 }], viewportWidth: 951, bandHeight: 82 })).toBe(82);
@@ -535,19 +521,50 @@ describe("right panel and header clearance", () => {
   });
 });
 
-describe("keyboardLikelyUp (Restore stays put while typing)", () => {
-  const base = { width: 951, height: 669 };
-  it("is up when a field has focus and the window shrank at the same width", () => {
-    expect(keyboardLikelyUp({ baseline: base, now: { width: 951, height: 350 }, editableFocused: true })).toBe(true);
+describe("stepKeyboardFreeze", () => {
+  const run = (steps: Array<{ w: number; h: number; focused: boolean }>) => {
+    let baseline: { width: number; height: number } | null = null;
+    return steps.map((s) => {
+      const r = stepKeyboardFreeze({ baseline, now: { width: s.w, height: s.h }, editableFocused: s.focused });
+      baseline = r.baseline;
+      return r.frozen;
+    });
+  };
+  it("freezes from the first small shrink of an animating keyboard (669→620→570→520→350)", () => {
+    expect(run([
+      { w: 951, h: 669, focused: false },
+      { w: 951, h: 669, focused: true },
+      { w: 951, h: 620, focused: true },
+      { w: 951, h: 570, focused: true },
+      { w: 951, h: 520, focused: true },
+      { w: 951, h: 350, focused: true },
+    ])).toEqual([false, false, true, true, true, true]);
   });
-  it("is not up without a focused field, or for small changes", () => {
-    expect(keyboardLikelyUp({ baseline: base, now: { width: 951, height: 350 }, editableFocused: false })).toBe(false);
-    expect(keyboardLikelyUp({ baseline: base, now: { width: 951, height: 640 }, editableFocused: true })).toBe(false);
+  it("unfreezes when the keyboard closes (focus leaves)", () => {
+    expect(run([
+      { w: 951, h: 669, focused: true },
+      { w: 951, h: 400, focused: true },
+      { w: 951, h: 669, focused: false },
+    ]).at(-1)).toBe(false);
   });
-  it("a width change (rotation, fold) is never the keyboard", () => {
-    expect(keyboardLikelyUp({ baseline: base, now: { width: 669, height: 400 }, editableFocused: true })).toBe(false);
+  it("a width change (rotation, fold) re-anchors even while typing", () => {
+    expect(run([
+      { w: 951, h: 669, focused: true },
+      { w: 951, h: 400, focused: true },
+      { w: 669, h: 600, focused: true },
+      { w: 669, h: 580, focused: true },
+    ])).toEqual([false, true, false, true]);
   });
-  it("without a baseline it can't tell, so it isn't up", () => {
-    expect(keyboardLikelyUp({ baseline: null, now: base, editableFocused: true })).toBe(false);
+  it("unfreezes when the keyboard closes while the field keeps focus", () => {
+    expect(run([
+      { w: 951, h: 669, focused: true },
+      { w: 951, h: 620, focused: true },
+      { w: 951, h: 400, focused: true },
+      { w: 951, h: 669, focused: true },
+    ])).toEqual([false, true, true, false]);
+  });
+
+  it("focus without a shrink doesn't freeze", () => {
+    expect(run([{ w: 951, h: 669, focused: false }, { w: 951, h: 669, focused: true }])).toEqual([false, false]);
   });
 });

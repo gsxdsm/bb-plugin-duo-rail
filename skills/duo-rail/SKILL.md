@@ -39,8 +39,10 @@ time. If the whole header doesn't fit there (for example with the sidebar
 open), only the title and its menu stay in that row and bb's other controls
 drop to the line below. A panel on the right that reaches the status bar
 (such as Taskboard) starts below it; the chat and sidebar keep the top.
-Restore sits in the left side rail just above settings, with a small 16px
-icon and a 36pt touch area. Without a docked rail (bb's compact layout), it
+Restore sits in the left side rail just above bb's Settings button, with a
+small 16px icon and a 36pt touch area; the rail's icon list is shortened by
+the button's height so nothing sits under it (every icon still scrolls into
+view). Without a docked rail (bb's compact layout), it
 sits beside bb's sidebar toggle. While the keyboard is up, Restore stays where
 it was; it re-anchors when the keyboard closes or the width changes. "Unfolded" means a
 window at least 600pt wide, or an app top bar guide at least 450pt wide.

@@ -387,31 +387,6 @@ export function chooseTopRowMode(input: {
   return null;
 }
 
-/**
- * Restore's spot in the left rail once the rail's top is in use: centred on
- * the rail, just above its bottom-most control (bb's settings), moved up past
- * any other rail control it would overlap.
- */
-export function placeAboveRailBottom(input: {
-  /** Visible controls in the rail column. */
-  railControls: Rect[];
-  /** Horizontal centre of the rail. */
-  centreX: number;
-  size: number;
-  gap?: number;
-}): { left: number; top: number } | null {
-  const gap = input.gap ?? 8;
-  if (input.railControls.length === 0) return null;
-  const bottom = input.railControls.reduce((a, b) => (b.y > a.y ? b : a));
-  const left = Math.round(input.centreX - input.size / 2);
-  let top = Math.round(bottom.y - gap - input.size);
-  // Step up past any control in the way.
-  for (const r of [...input.railControls].sort((a, b) => b.y - a.y)) {
-    const hits = r.x < left + input.size && r.x + r.width > left && r.y < top + input.size && r.y + r.height > top;
-    if (hits) top = Math.round(r.y - gap - input.size);
-  }
-  return top >= 0 ? { left: Math.max(0, left), top } : null;
-}
 
 /**
  * Bottom of the status region at the top right (the pill with the time and
@@ -435,18 +410,24 @@ export function reachesStatus(box: { left: number; right: number }, statusStart:
   return box.right > statusStart - gap;
 }
 
+
 /**
- * Whether the keyboard is up: a field has focus and the window got shorter at
- * the same width. The keyboard never changes the width; a rotation or fold
- * does, and then the layout should follow.
+ * One step of the keyboard freeze. The baseline is the window size before
+ * typing: it is reset whenever no field has focus or the width changes, and
+ * kept (only ever grown) while a field has focus at the same width. The
+ * button freezes from the first same-width shrink with a field focused, so a
+ * keyboard that animates in small steps can't drag it along.
  */
-export function keyboardLikelyUp(input: {
+export function stepKeyboardFreeze(input: {
   baseline: { width: number; height: number } | null;
   now: { width: number; height: number };
   editableFocused: boolean;
-  threshold?: number;
-}): boolean {
-  if (!input.editableFocused || input.baseline === null) return false;
-  if (Math.abs(input.now.width - input.baseline.width) > 1) return false;
-  return input.baseline.height - input.now.height > (input.threshold ?? 100);
+}): { baseline: { width: number; height: number }; frozen: boolean } {
+  const { baseline, now } = input;
+  const sameWidth = baseline !== null && Math.abs(now.width - baseline.width) <= 1;
+  if (!input.editableFocused || !sameWidth || baseline === null) {
+    return { baseline: now, frozen: false };
+  }
+  const kept = { width: baseline.width, height: Math.max(baseline.height, now.height) };
+  return { baseline: kept, frozen: now.height < kept.height - 1 };
 }

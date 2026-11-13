@@ -37,10 +37,9 @@ import {
   computeTopRow,
   isIOSWebKit,
   isUnfoldedWindow,
-  keyboardLikelyUp,
+  stepKeyboardFreeze,
   reachesStatus,
   statusBottom,
-  placeAboveRailBottom,
   NativeRailController,
   placeRestoreInTopBand,
   resolveRailSide,
@@ -94,6 +93,8 @@ const ATTR_STATUS_CLEAR = "data-bb-duo-status-clear";
 const VAR_STATUS_BOTTOM = "--bb-duo-status-bottom";
 /** Folded, rail restored: Expand sits beside bb's sidebar toggle; the header row makes room. */
 const ATTR_LEFT_SLOT = "data-bb-duo-left-slot";
+/** The rail's scrolling list, shortened so Restore has a free slot above Settings. */
+const ATTR_RAIL_ROOM = "data-bb-duo-rail-room";
 const VAR_ROW_PAD_LEFT = "--bb-duo-row-pad-left";
 /** Restore in the top row matches bb's header icon buttons. */
 const ROW_TOGGLE_SIZE = 36;
@@ -355,6 +356,7 @@ html[${ATTR_TOP_ROW}] [data-testid="app-sidebar-trigger-overlay"] { top: var(${V
    below it; the chat and sidebar keep the top. */
 html[${ATTR_TOP_ROW}] [${ATTR_STATUS_CLEAR}] { padding-top: var(${VAR_STATUS_BOTTOM}, 0px) !important; }
 html[${ATTR_LEFT_SLOT}] [data-testid="app-page-header-content-row"] { padding-left: var(${VAR_ROW_PAD_LEFT}) !important; }
+[${ATTR_RAIL_ROOM}] { margin-bottom: ${ROW_TOGGLE_SIZE + 8}px !important; }
 html[${ATTR_TOP_ROW}="full"] [data-app-content-shell] header:has([data-testid="app-page-header-content-row"]) {
   height: var(${VAR_ROW_HEIGHT}, var(--bb-app-chrome-row-height, 3rem)) !important;
   display: flex !important;
@@ -572,25 +574,59 @@ function mountLayout({ signal }: { signal: AbortSignal }) {
    */
   const leftRailSpot = (s: DuoState) => {
     if (!s.nativeExpanded || !isUnfoldedWindow(window, s.windowLayout)) return null;
-    const trigger = document.querySelector<HTMLElement>(
-      '[data-testid="app-sidebar-trigger-overlay"] [data-sidebar="trigger"]',
-    );
-    const t = trigger?.getBoundingClientRect();
-    if (!t || t.width <= 0) return null;
-    // Only a docked, visible sidebar has a rail. In bb's compact layout the
-    // sidebar is a drawer (a closed dialog off screen).
-    const sidebar = document.querySelector<HTMLElement>('[data-sidebar="sidebar"]');
-    const sb = sidebar?.getBoundingClientRect();
-    if (!sidebar || !sb || sb.width <= 0 || sb.left < -1 || sidebar.closest('[role="dialog"]')) return null;
-    const centreX = t.left + t.width / 2;
-    const railControls = Array.from(
-      document.querySelectorAll<HTMLElement>('[data-sidebar="sidebar"] button, [data-sidebar="sidebar"] a'),
-    )
-      .map((el) => el.getBoundingClientRect())
-      .filter((r) => r.width > 0 && Math.abs(r.left + r.width / 2 - centreX) <= 10)
-      .map((r) => ({ x: r.left, y: r.top, width: r.width, height: r.height }));
-    return placeAboveRailBottom({ railControls, centreX, size: ROW_TOGGLE_SIZE });
+    // Anchor on bb's Settings button when it is actually visible (on screen
+    // and topmost at its centre, so a closed drawer's copy doesn't count).
+    const settings = Array.from(
+      document.querySelectorAll<HTMLElement>('[data-sidebar="sidebar"] button[aria-label^="Settings"]'),
+    ).find((el) => {
+      const b = el.getBoundingClientRect();
+      if (b.width <= 0 || b.left < 0 || b.top < 0 || b.right > window.innerWidth || b.bottom > window.innerHeight) {
+        return false;
+      }
+      const hit = document.elementFromPoint(b.left + b.width / 2, b.top + b.height / 2);
+      return !!hit && (hit === el || el.contains(hit));
+    });
+    if (!settings) {
+      clearRailRoom();
+      return null;
+    }
+    // Make room: shorten the rail's scrolling list (the scrollable ancestor of
+    // the rail's icons) so nothing sits in the slot above Settings. Every icon
+    // stays reachable by scrolling.
+    const sidebar = settings.closest<HTMLElement>('[data-sidebar="sidebar"]');
+    const sx = settings.getBoundingClientRect();
+    const centreX = sx.left + sx.width / 2;
+    const icon = Array.from(sidebar?.querySelectorAll<HTMLElement>("button, a") ?? []).find((el) => {
+      const r = el.getBoundingClientRect();
+      return r.width > 0 && r.bottom <= sx.top && Math.abs(r.left + r.width / 2 - centreX) <= 10;
+    });
+    let scroller: HTMLElement | null = icon?.parentElement ?? null;
+    while (scroller && scroller !== sidebar) {
+      const oy = getComputedStyle(scroller).overflowY;
+      if ((oy === "auto" || oy === "scroll") && scroller.scrollHeight > 0) break;
+      scroller = scroller.parentElement;
+    }
+    if (scroller && scroller !== sidebar && !scroller.contains(settings)) {
+      if (railRoom !== scroller) {
+        clearRailRoom();
+        scroller.setAttribute(ATTR_RAIL_ROOM, "");
+        railRoom = scroller;
+      }
+    } else clearRailRoom();
+    const sb = settings.getBoundingClientRect();
+    return {
+      left: Math.round(sb.left + sb.width / 2 - ROW_TOGGLE_SIZE / 2),
+      top: Math.round(sb.top - 8 - ROW_TOGGLE_SIZE),
+    };
   };
+
+  let railRoom: HTMLElement | null = null;
+  const clearRailRoom = () => {
+    railRoom?.removeAttribute(ATTR_RAIL_ROOM);
+    railRoom = null;
+  };
+
+
 
   /**
    * The unfolded top row's geometry, or null when it does not apply: not
@@ -692,10 +728,13 @@ function mountLayout({ signal }: { signal: AbortSignal }) {
     return !!el && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName));
   };
   const keyboardUp = () => {
-    const now = { width: window.innerWidth, height: window.innerHeight };
-    const up = keyboardLikelyUp({ baseline: keyboardBaseline, now, editableFocused: editableFocused() });
-    if (!up) keyboardBaseline = now;
-    return up;
+    const step = stepKeyboardFreeze({
+      baseline: keyboardBaseline,
+      now: { width: window.innerWidth, height: window.innerHeight },
+      editableFocused: editableFocused(),
+    });
+    keyboardBaseline = step.baseline;
+    return step.frozen;
   };
   const holdToggleWhileTyping = () => {
     if (keyboardUp() && lastTogglePos) {
@@ -713,7 +752,11 @@ function mountLayout({ signal }: { signal: AbortSignal }) {
 
   const placeToggleNow = (s: DuoState) => {
     toggle.removeAttribute("data-compact");
-    if (s.railSide === null) clearLeftSlot();
+    if (s.railSide === null) {
+      clearLeftSlot();
+      clearRailRoom();
+    }
+    if (!s.nativeExpanded) clearRailRoom();
     if (s.railSide === null) return;
     const probeStyle = getComputedStyle(probe);
     if (s.nativeExpanded) {
@@ -755,6 +798,7 @@ function mountLayout({ signal }: { signal: AbortSignal }) {
         toggle.style.top = `${railSpot.top}px`;
         return;
       }
+      clearRailRoom();
       if (isUnfoldedWindow(window, s.windowLayout)) {
         // Unfolded but compact (no docked rail): beside bb's sidebar toggle.
         const slot = slotBesideSidebarToggle();
@@ -1037,6 +1081,7 @@ function mountLayout({ signal }: { signal: AbortSignal }) {
     clearTopRow();
     clearPanelsFromStatus(getState(), false);
     clearLeftSlot();
+    clearRailRoom();
   };
 }
 
