@@ -366,6 +366,15 @@ function measureCameraBlock(
   return bottoms.length === 0 ? null : Math.ceil(Math.max(...bottoms));
 }
 
+/** bb's header row height in px, read from `--bb-app-chrome-row-height` (3rem today). */
+function chromeRowHeightPx(root: HTMLElement): number {
+  const style = getComputedStyle(root);
+  const raw = style.getPropertyValue("--bb-app-chrome-row-height").trim();
+  const value = parseFloat(raw);
+  if (!Number.isFinite(value)) return 48;
+  return raw.endsWith("rem") ? value * (parseFloat(style.fontSize) || 16) : value;
+}
+
 function mountLayout({ signal }: { signal: AbortSignal }) {
   const root = document.documentElement;
 
@@ -383,6 +392,14 @@ function mountLayout({ signal }: { signal: AbortSignal }) {
       )
     : null;
   let lastSide = readLastSide();
+  // A page reload or navigation also tears this script down. Only restore the
+  // vertical bar for a real unload (plugin disabled or removed), not then.
+  let pageGoingAway = false;
+  const markPageGoingAway = () => {
+    pageGoingAway = true;
+  };
+  window.addEventListener("beforeunload", markPageGoingAway, { signal });
+  window.addEventListener("pagehide", markPageGoingAway, { signal });
 
   const style = document.createElement("style");
   style.setAttribute("data-bb-plugin", "duo-rail");
@@ -452,6 +469,7 @@ function mountLayout({ signal }: { signal: AbortSignal }) {
         viewportWidth: window.innerWidth,
         occlusions: s.windowLayout?.occlusions ?? [],
         size: TOGGLE_SIZE,
+        chromeRowHeight: chromeRowHeightPx(root),
       });
       toggle.style.left = `${spot.left}px`;
       toggle.style.top = `${spot.top}px`;
@@ -574,8 +592,15 @@ function mountLayout({ signal }: { signal: AbortSignal }) {
   apply();
 
   return () => {
-    // Leave the app as we found it: restore the vertical bar if we turned it off.
-    void controller?.dispose();
+    // Leave the app as we found it when the plugin goes away: restore the
+    // vertical bar if we turned it off. A reload or navigation also tears this
+    // script down, sometimes before pagehide fires, so the restore waits a
+    // tick: an unloading page never runs the timer, a disabled plugin does.
+    if (controller !== null) {
+      setTimeout(() => {
+        if (!pageGoingAway) void controller.dispose();
+      }, 0);
+    }
     cancelAnimationFrame(frame);
     clearTimeout(settleTimer);
     insetObserver.disconnect();

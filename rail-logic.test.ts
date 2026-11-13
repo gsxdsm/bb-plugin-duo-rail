@@ -207,14 +207,56 @@ describe("placeRestoreInTopBand", () => {
     const pill = { x: 266, y: 0, width: 200, height: 82 };
     expect(
       placeRestoreInTopBand({ insetTop: 82, viewportWidth: 466, occlusions: [pill], size: 36 }),
-    ).toEqual({ left: 12, top: 23 });
+    ).toEqual({ left: 12, top: 23, placement: "band" });
   });
 
   it("moves to the right end when the left end is occluded", () => {
     const pill = { x: 0, y: 0, width: 200, height: 82 };
     expect(
       placeRestoreInTopBand({ insetTop: 82, viewportWidth: 466, occlusions: [pill], size: 36 }),
-    ).toEqual({ left: 418, top: 23 });
+    ).toEqual({ left: 418, top: 23, placement: "band" });
+  });
+});
+
+describe("Restore stays reachable on every native-expanded layout", () => {
+  it("unfolded, no edge, thin top band: goes below the header at the right end", () => {
+    // Unfolded inner screen with the bar off: no rail edge, a thin top inset,
+    // so the band cannot hold the button without covering bb's header row.
+    expect(
+      placeRestoreInTopBand({ insetTop: 24, viewportWidth: 900, occlusions: [], size: 36, chromeRowHeight: 48 }),
+    ).toEqual({ left: 852, top: 80, placement: "below-header" });
+  });
+
+  it("unfolded with no top inset at all still clears the header row", () => {
+    const spot = placeRestoreInTopBand({ insetTop: 0, viewportWidth: 900, occlusions: [], size: 36, chromeRowHeight: 48 });
+    expect(spot.placement).toBe("below-header");
+    expect(spot.top).toBeGreaterThanOrEqual(48);
+  });
+
+  it("below the header, moves left if an occlusion sits at the right end", () => {
+    const blocker = { x: 800, y: 60, width: 100, height: 60 };
+    expect(
+      placeRestoreInTopBand({ insetTop: 24, viewportWidth: 900, occlusions: [blocker], size: 36, chromeRowHeight: 48 }),
+    ).toEqual({ left: 12, top: 80, placement: "below-header" });
+  });
+
+  it("keeps a rail side after reload when only the persisted side is known", () => {
+    // After a reload while expanded: no inset, bar reported disabled.
+    const layout = { edge: "none" as const, behavior: "disabled" as const, occlusions: [] };
+    expect(resolveRailSide({ detected: null, layout, nativeSupported: true, lastKnown: "left" })).toBe("left");
+    // Fresh storage (e.g. first load on the unfolded screen): still offers Restore.
+    expect(resolveRailSide({ detected: null, layout, nativeSupported: true, lastKnown: null })).toBe("right");
+  });
+
+  it("a controller created while native is already expanded restores on request", async () => {
+    const f = fakeNative();
+    const c = new NativeRailController(f.native, true);
+    const done = c.set(false);
+    await flushMicrotasks();
+    expect(f.calls).toEqual([{ kind: SET_RAIL_EXPANDED, payload: { expanded: false } }]);
+    await f.succeed();
+    await done;
+    expect(c.nativeExpanded).toBe(false);
   });
 });
 

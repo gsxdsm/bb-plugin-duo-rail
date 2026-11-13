@@ -25,9 +25,12 @@ off. iOS then draws the status bar across the top and removes the rail inset,
 so bb uses the full width with its header below the status bar. Restore turns
 the vertical bar back on. There is no separate app setting: the plugin's
 expand/restore choice is the only switch, saved per device. The plugin keeps
-track of the rail side while the inset is gone, shows the Restore button in
-the top band clear of the status pill, and restores the vertical bar when
-`mode` is `off` or the plugin is disabled or unloaded. Requests are sent one at
+track of the rail side while the inset is gone. It shows the Restore button in
+the top band, clear of the status pill. When that band is too thin to hold the
+button (the unfolded screen), the button goes just below bb's header row at
+the right edge. The button stays after a page reload. The plugin restores the
+vertical bar when `mode` is `off` or the plugin is disabled or removed, but
+not when the page merely reloads. Requests are sent one at
 a time, and rapid taps collapse to the last choice. If a request fails, the
 plugin falls back to the CSS expansion.
 

@@ -128,8 +128,12 @@ export function resolveRailSide(input: {
 
 /**
  * Where to put the Restore button once native expansion has moved the status
- * bar to the top: inside the top safe-area band, vertically centred, on
- * whichever end of the band is clear of the status pill and camera.
+ * bar to the top. When the top safe-area band is tall enough (the folded
+ * cover screen: about 82pt), the button sits inside it, vertically centred,
+ * on whichever end is clear of the status pill and camera. When the band is
+ * too thin (e.g. the unfolded inner screen), it would land on bb's header
+ * controls, so it goes just below the header row at the right end instead,
+ * again avoiding any reported occlusion.
  */
 export function placeRestoreInTopBand(input: {
   insetTop: number;
@@ -137,9 +141,15 @@ export function placeRestoreInTopBand(input: {
   occlusions: Rect[];
   size: number;
   margin?: number;
-}): { left: number; top: number } {
+  /** Height of bb's header row below the top inset (`--bb-app-chrome-row-height`). */
+  chromeRowHeight?: number;
+}): { left: number; top: number; placement: "band" | "below-header" } {
   const margin = input.margin ?? 12;
-  const top = Math.max(4, Math.round((input.insetTop - input.size) / 2));
+  const pad = 4;
+  const fitsBand = input.insetTop >= input.size + 2 * pad;
+  const top = fitsBand
+    ? Math.round((input.insetTop - input.size) / 2)
+    : Math.round(input.insetTop + (input.chromeRowHeight ?? 48) + 8);
   const overlaps = (left: number) =>
     input.occlusions.some(
       (r) =>
@@ -150,8 +160,11 @@ export function placeRestoreInTopBand(input: {
     );
   const leftEnd = margin;
   const rightEnd = input.viewportWidth - input.size - margin;
-  const left = !overlaps(leftEnd) ? leftEnd : !overlaps(rightEnd) ? rightEnd : leftEnd;
-  return { left: Math.round(left), top };
+  // In the band, prefer the left end (the pill is usually top right); below
+  // the header, prefer the right end, away from bb's sidebar control.
+  const [first, second] = fitsBand ? [leftEnd, rightEnd] : [rightEnd, leftEnd];
+  const left = !overlaps(first) ? first : !overlaps(second) ? second : first;
+  return { left: Math.round(left), top, placement: fitsBand ? "band" : "below-header" };
 }
 
 /** The navigator fields that tell an iOS WebKit page apart (iPadOS reports MacIntel with touch). */
