@@ -33,8 +33,8 @@ import {
   useSettings,
 } from "@get-bb/plugin-sdk/app";
 import {
+  chooseTopRowMode,
   computeTopRow,
-  headerFitsTopRow,
   placeInLeftRail,
   isIOSWebKit,
   isUnfoldedScreen,
@@ -81,6 +81,9 @@ const VAR_SIDE = "--bb-duo-side-inset";
 const ATTR_TOP_ROW = "data-bb-duo-top-row";
 const VAR_ROW_HEIGHT = "--bb-duo-top-row-height";
 const VAR_ROW_RESERVE = "--bb-duo-top-row-reserve";
+/** Split mode: the title group's width in the status row, and the header's two-line height. */
+const VAR_TITLE_WIDTH = "--bb-duo-top-row-title";
+const VAR_SPLIT_HEIGHT = "--bb-duo-top-row-split";
 /** Restore in the top row matches bb's header icon buttons. */
 const ROW_TOGGLE_SIZE = 32;
 
@@ -328,13 +331,33 @@ body:has([role="dialog"]:not([data-state="closed"]), [role="alertdialog"]:not([d
    time; the rest of the page starts below that row. The sidebar column keeps
    its own top inset. */
 html[${ATTR_TOP_ROW}] [data-app-content-shell] { padding-top: 0 !important; }
-html[${ATTR_TOP_ROW}] [data-app-content-shell] header:has([data-testid="app-page-header-content-row"]) {
+html[${ATTR_TOP_ROW}="full"] [data-app-content-shell] header:has([data-testid="app-page-header-content-row"]) {
   height: var(${VAR_ROW_HEIGHT}, var(--bb-app-chrome-row-height, 3rem)) !important;
   display: flex !important;
   align-items: center !important;
   padding-right: var(${VAR_ROW_RESERVE}, 0px) !important;
 }
-html[${ATTR_TOP_ROW}] [data-app-content-shell] header [data-testid="app-page-header-content-row"] { flex: 1 1 auto; min-width: 0; }
+html[${ATTR_TOP_ROW}="full"] [data-app-content-shell] header [data-testid="app-page-header-content-row"] { flex: 1 1 auto; min-width: 0; }
+/* Split: only the title and its "…" menu go up into the status row; bb's
+   other controls wrap to a second line below the band, right-aligned. */
+html[${ATTR_TOP_ROW}="split"] [data-app-content-shell] header:has([data-testid="app-page-header-content-row"]) {
+  height: var(${VAR_SPLIT_HEIGHT}) !important;
+}
+html[${ATTR_TOP_ROW}="split"] [data-app-content-shell] header [data-testid="app-page-header-content-row"] {
+  height: auto !important;
+  flex-wrap: wrap !important;
+  align-content: flex-start !important;
+  row-gap: 0 !important;
+}
+html[${ATTR_TOP_ROW}="split"] [data-app-content-shell] header [data-testid="app-page-header-content-row"] > :first-child {
+  flex: 0 0 var(${VAR_TITLE_WIDTH}) !important;
+  max-width: var(${VAR_TITLE_WIDTH}) !important;
+  height: var(${VAR_ROW_HEIGHT}) !important;
+}
+html[${ATTR_TOP_ROW}="split"] [data-app-content-shell] header [data-testid="app-page-header-content-row"] > :last-child {
+  height: var(--bb-app-chrome-row-height, 3rem) !important;
+  margin-left: auto !important;
+}
 /* Restore sits in that row or the left rail like one of bb's icon buttons. */
 html[${ATTR_TOP_ROW}] .bb-duo-toggle,
 .bb-duo-toggle[data-compact] {
@@ -511,6 +534,13 @@ function mountLayout({ signal }: { signal: AbortSignal }) {
   document.body.appendChild(cap);
 
   /** Centres the toggle in the rail, just below the camera block. */
+  const clearTopRow = () => {
+    root.removeAttribute(ATTR_TOP_ROW);
+    for (const name of [VAR_ROW_HEIGHT, VAR_ROW_RESERVE, VAR_TITLE_WIDTH, VAR_SPLIT_HEIGHT]) {
+      root.style.removeProperty(name);
+    }
+  };
+
   /** Restore's spot in the left side rail when unfolded and expanded natively, if there is room. */
   const leftRailSpot = (s: DuoState) => {
     if (!s.nativeExpanded || !isUnfoldedScreen(window.screen)) return null;
@@ -548,15 +578,30 @@ function mountLayout({ signal }: { signal: AbortSignal }) {
       size: ROW_TOGGLE_SIZE,
       railToggle: leftRailSpot(s),
     });
-    // bb's controls are the row's last, fixed-width group; the title shrinks.
+    // bb's row: the title group (title + "…" Thread actions) first, then a
+    // fixed-width group of secondary controls. The title shrinks.
+    const titleGroup = row.firstElementChild as HTMLElement | null;
     const controls = row.lastElementChild as HTMLElement | null;
-    const rowEnd = window.innerWidth - geometry.reserveRight + 8;
-    const fits = headerFitsTopRow({
-      rowLeft: row.getBoundingClientRect().left,
-      controlsWidth: controls && controls !== row.firstElementChild ? controls.getBoundingClientRect().width : 0,
-      toggleLeft: rowEnd,
+    const menu =
+      titleGroup?.querySelector<HTMLElement>('button[aria-label="Thread actions"]') ??
+      (titleGroup ? Array.from(titleGroup.querySelectorAll<HTMLElement>("button")).at(-1) ?? null : null);
+    const rowLeft = row.getBoundingClientRect().left;
+    // The row must stop just before the time (Restore lives in the rail).
+    const rowEnd = window.innerWidth - geometry.reserveRight;
+    const mode = chooseTopRowMode({
+      rowLeft,
+      rowEnd,
+      controlsWidth:
+        controls && controls !== titleGroup ? controls.getBoundingClientRect().width : 0,
+      menuWidth: menu?.getBoundingClientRect().width ?? 32,
     });
-    return fits ? geometry : null;
+    if (mode === null) return null;
+    return {
+      ...geometry,
+      mode,
+      titleWidth: Math.max(0, Math.floor(rowEnd - rowLeft)),
+      splitHeight: geometry.rowHeight + chromeRowHeightPx(root),
+    };
   };
 
   const placeToggle = (s: DuoState) => {
@@ -576,6 +621,8 @@ function mountLayout({ signal }: { signal: AbortSignal }) {
       if (row) {
         root.style.setProperty(VAR_ROW_HEIGHT, `${row.rowHeight}px`);
         root.style.setProperty(VAR_ROW_RESERVE, `${row.reserveRight}px`);
+        root.style.setProperty(VAR_TITLE_WIDTH, `${row.titleWidth}px`);
+        root.style.setProperty(VAR_SPLIT_HEIGHT, `${row.splitHeight}px`);
         toggle.style.left = `${row.toggle.left}px`;
         toggle.style.top = `${row.toggle.top}px`;
         return;
@@ -631,12 +678,9 @@ function mountLayout({ signal }: { signal: AbortSignal }) {
     else root.removeAttribute(ATTR_EXPANDED);
     root.style.setProperty(VAR_CAMERA, `${railBlockHeight(s)}px`);
     root.style.setProperty(VAR_SIDE, `${s.sideInset}px`);
-    if (topRowGeometry(s)) root.setAttribute(ATTR_TOP_ROW, "");
-    else {
-      root.removeAttribute(ATTR_TOP_ROW);
-      root.style.removeProperty(VAR_ROW_HEIGHT);
-      root.style.removeProperty(VAR_ROW_RESERVE);
-    }
+    const topRow = topRowGeometry(s);
+    if (topRow) root.setAttribute(ATTR_TOP_ROW, topRow.mode);
+    else clearTopRow();
 
     toggle.hidden = s.railSide === null || s.mode === "off";
     // Only while the rail is free: expanded, the chat covers that spot.
@@ -716,6 +760,10 @@ function mountLayout({ signal }: { signal: AbortSignal }) {
   const OBSERVE = [
     "[data-app-content-shell]",
     '[data-testid="app-page-header-content-row"]',
+    // The title group and bb's controls render after the row: their widths
+    // decide between the full and split top row.
+    '[data-testid="app-page-header-content-row"] > :first-child',
+    '[data-testid="app-page-header-content-row"] > :last-child',
     '[data-testid="app-sidebar-trigger-overlay"] [data-sidebar="trigger"]',
   ];
   const observeShell = () => {
@@ -797,9 +845,7 @@ function mountLayout({ signal }: { signal: AbortSignal }) {
     root.removeAttribute(ATTR_EXPANDED);
     root.style.removeProperty(VAR_CAMERA);
     root.style.removeProperty(VAR_SIDE);
-    root.removeAttribute(ATTR_TOP_ROW);
-    root.style.removeProperty(VAR_ROW_HEIGHT);
-    root.style.removeProperty(VAR_ROW_RESERVE);
+    clearTopRow();
   };
 }
 

@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  chooseTopRowMode,
+  CAMERA_ONLY_MAX_WIDTH,
   computeTopRow,
   placeInLeftRail,
   headerFitsTopRow,
@@ -447,5 +449,53 @@ describe("Restore in the left side rail (unfolded)", () => {
       railToggle: { left: 4, top: 19 },
     });
     expect(row).toEqual({ rowHeight: 70, reserveRight: 248, toggle: { left: 4, top: 19 } });
+  });
+});
+
+describe("chooseTopRowMode", () => {
+  // The user's screen: 951pt wide, sidebar open (row starts at 336), bb's
+  // controls 347pt, the "…" button 28pt, the time at about 740.
+  it("splits on the user's screen: title and menu up, controls below", () => {
+    expect(chooseTopRowMode({ rowLeft: 336, rowEnd: 732, controlsWidth: 347, menuWidth: 28 })).toBe("split");
+  });
+  it("moves the whole header when everything fits (sidebar collapsed)", () => {
+    expect(chooseTopRowMode({ rowLeft: 65, rowEnd: 732, controlsWidth: 347, menuWidth: 28 })).toBe("full");
+  });
+  it("keeps bb's normal header when even the title and menu don't fit", () => {
+    expect(chooseTopRowMode({ rowLeft: 600, rowEnd: 732, controlsWidth: 347, menuWidth: 28 })).toBeNull();
+  });
+  it("boundaries are exact", () => {
+    expect(chooseTopRowMode({ rowLeft: 0, rowEnd: 28 + TOP_ROW_MIN_TITLE + 8, controlsWidth: 999, menuWidth: 28 })).toBe("split");
+    expect(chooseTopRowMode({ rowLeft: 0, rowEnd: 28 + TOP_ROW_MIN_TITLE + 7, controlsWidth: 999, menuWidth: 28 })).toBeNull();
+  });
+});
+
+describe("measured iPhone Duo layouts (simulator, iOS 27.1, bar disabled)", () => {
+  const disabled = (occlusions: { x: number; y: number; width: number; height: number }[], topBar: { x: number; y: number; width: number; height: number } | null) =>
+    ({ edge: "none" as const, behavior: "disabled" as const, occlusions, topBar });
+  const cases = [
+    { name: "folded cover 466x678", w: 466, topBar: { x: 2.3, y: 26, width: 263.7, height: 44 },
+      occ: [{ x: 399.7, y: 29.3, width: 37, height: 37 }, { x: 266, y: 0, width: 200, height: 82 }], time: 266 },
+    { name: "unfolded wide 951x669", w: 951, topBar: { x: 16, y: 26, width: 791, height: 44 },
+      occ: [{ x: 807, y: 0, width: 144, height: 82 }], time: 807 },
+    { name: "unfolded tall 669x951", w: 669, topBar: { x: 16, y: 26, width: 509, height: 44 },
+      occ: [{ x: 525, y: 0, width: 144, height: 82 }], time: 525 },
+  ];
+  for (const c of cases) {
+    it(`${c.name}: the time starts at the top bar guide's end`, () => {
+      expect(statusStartX({ layout: disabled(c.occ, c.topBar), bandHeight: 82, viewportWidth: c.w })).toBeCloseTo(c.time, 0);
+    });
+    it(`${c.name}: without the guide, the pill occlusion's left edge is used as-is`, () => {
+      expect(statusStartX({ layout: disabled(c.occ, null), bandHeight: 82, viewportWidth: c.w })).toBeCloseTo(c.time, 0);
+    });
+  }
+  it("a camera-only occlusion still leaves room for the time", () => {
+    const camera = { x: 399.7, y: 29.3, width: 37, height: 37 };
+    expect(camera.width).toBeLessThan(CAMERA_ONLY_MAX_WIDTH);
+    expect(statusStartX({ layout: disabled([camera], null), bandHeight: 82, viewportWidth: 466 })).toBeCloseTo(399.7 - STATUS_GLYPH_ALLOWANCE, 1);
+  });
+  it("on the user's unfolded screen with the sidebar open, title and menu go up, controls stay below", () => {
+    // Time at 807 (guide), so the row ends at 799; row starts at 336; bb's controls 367; "…" 28.
+    expect(chooseTopRowMode({ rowLeft: 336, rowEnd: 799, controlsWidth: 367, menuWidth: 28 })).toBe("split");
   });
 });

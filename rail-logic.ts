@@ -51,8 +51,17 @@ export function statusStartX(input: {
       r.x + r.width / 2 > input.viewportWidth / 2,
   );
   if (inBand.length === 0) return null;
-  return Math.min(...inBand.map((r) => r.x)) - STATUS_GLYPH_ALLOWANCE;
+  const leftmost = inBand.reduce((a, b) => (b.x < a.x ? b : a));
+  // A status-pill occlusion (measured 144-200pt wide, wider with Live
+  // Activities) already includes the time. A camera-sized one doesn't: the
+  // time and icons sit to its left, so leave room for them.
+  return leftmost.width >= CAMERA_ONLY_MAX_WIDTH
+    ? leftmost.x
+    : leftmost.x - STATUS_GLYPH_ALLOWANCE;
 }
+
+/** Occlusions narrower than this are a camera cut-out, not the status pill. */
+export const CAMERA_ONLY_MAX_WIDTH = 100;
 
 /** The capability a bb app advertises when it can expand the rail natively. */
 export const RAIL_EXPANSION_CAPABILITY = "rail-expansion";
@@ -341,4 +350,28 @@ export function placeInLeftRail(input: {
     left: Math.max(pad, Math.round(centre - input.size / 2)),
     top: Math.round((input.insetTop - input.size) / 2),
   };
+}
+
+/**
+ * How much of bb's header goes into the unfolded status row:
+ * - "full": the title, its menu and every control fit before the time;
+ * - "split": only the title (at least TOP_ROW_MIN_TITLE) and its "…" menu
+ *   fit, so those go up and bb's other controls stay on a line below the band;
+ * - null: not even the title and its menu fit; bb's normal header stays.
+ */
+export function chooseTopRowMode(input: {
+  rowLeft: number;
+  /** Where the row must end: just before the time (or Restore, if it's in the row). */
+  rowEnd: number;
+  /** Width of bb's secondary controls group. */
+  controlsWidth: number;
+  /** Width of the title's "…" Thread actions button. */
+  menuWidth: number;
+  gap?: number;
+}): "full" | "split" | null {
+  const gap = input.gap ?? 8;
+  const available = input.rowEnd - input.rowLeft;
+  if (available >= input.controlsWidth + TOP_ROW_MIN_TITLE + gap) return "full";
+  if (available >= input.menuWidth + TOP_ROW_MIN_TITLE + gap) return "split";
+  return null;
 }
