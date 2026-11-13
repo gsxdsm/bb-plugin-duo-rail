@@ -1,0 +1,40 @@
+{
+  "name": "bb-plugin-duo-rail",
+  "version": "0.1.0",
+  "description": "Expands the bb chat into the folded iPhone Duo side rail while keeping UI clear of the camera and status bar.",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/gsxdsm/bb-plugin-duo-rail.git"
+  },
+  "type": "module",
+  "engines": {
+    "bb": ">=0.49",
+    "bbPluginSdk": ">=0.6.132"
+  },
+  "bb": {
+    "name": "Duo Rail",
+    "description": "Expands the bb chat into the folded iPhone Duo side rail while keeping UI clear of the camera and status bar.",
+    "branding": {
+      "icon": "Smartphone"
+    },
+    "server": "./server.ts",
+    "app": "./app.tsx",
+    "skills": [
+      "skills"
+    ]
+  },
+  "dependencies": {
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@get-bb/plugin-sdk": "0.6.132",
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/node": "^22.0.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "cron-parser": "^5.10.5",
+    "hono": "^4.13.18",
+    "typescript": "^5.7.0"
+  }
+}
