@@ -844,25 +844,10 @@ function mountLayout({ signal }: { signal: AbortSignal }) {
       toggle.style.top = `${spot.top}px`;
       return;
     }
-    // Folded with the rail restored: Expand goes to the upper-left corner,
-    // in the slot beside bb's sidebar toggle (which owns the corner itself).
-    const slot = foldedLeftSlot(s);
-    if (slot) {
-      toggle.setAttribute("data-compact", "");
-      toggle.style.left = `${slot.left}px`;
-      toggle.style.top = `${slot.top}px`;
-      placeSidebarButtonInRail(s, probeStyle);
-      return;
-    }
+    // Rail showing (folded or unfolded): Expand sits in the side rail, just
+    // below the camera and status block, with the sidebar button under it.
     clearLeftSlot();
     placeSidebarButtonInRail(s, probeStyle, true);
-  };
-
-  /** The slot right of bb's sidebar toggle, reserving room in the header row; null if not applicable. */
-  const foldedLeftSlot = (s: DuoState) => {
-    if (controller === null || s.nativeExpanded || s.mode === "off") return null;
-    if (isUnfoldedWindow(window, s.windowLayout)) return null;
-    return slotBesideSidebarToggle();
   };
 
   /** The slot right of bb's sidebar toggle, reserving room in the header row. */

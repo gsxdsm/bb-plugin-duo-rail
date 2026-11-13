@@ -26,8 +26,8 @@ so bb uses the full width with its header below the status bar. Restore turns
 the vertical bar back on. There is no separate app setting: the plugin's
 expand/restore choice is the only switch, saved per device. The plugin keeps
 track of the rail side while the inset is gone. On the folded screen, Restore sits in the upper-left corner of the top band.
-With the rail restored, Expand sits in the top-left slot right of bb's sidebar
-toggle, and the header row makes room for it. The plugin uses the app's top
+With the rail restored, Expand sits in the side rail, just below the camera
+and status block. The plugin uses the app's top
 bar guide (`topBar`) for where the time starts. Without it, it uses the left
 edge of the reported status pill; if only a small camera cut-out is reported,
 it leaves 160pt for the time and icons.
