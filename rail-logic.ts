@@ -13,6 +13,45 @@ export interface WindowLayout {
   edge: "none" | "leading" | "trailing";
   behavior: "automatic" | "disabled";
   occlusions: Rect[];
+  /**
+   * Where a top bar can sit beside the status bar (UIKit's top bar layout
+   * guide), when the app reports it. Its right edge is where the free space
+   * beside the time ends.
+   */
+  topBar?: Rect | null;
+}
+
+/**
+ * Room left for the time and status icons beside a reported occlusion. The
+ * occlusion only covers the camera cut-out; the time and icons are drawn to
+ * its left. Used only when the app does not report `topBar`.
+ */
+export const STATUS_GLYPH_ALLOWANCE = 160;
+
+/**
+ * The x where the status bar's content starts in the top row (the time and
+ * icons on the right), or null when nothing in the band says so. Prefers the
+ * app's top bar guide; otherwise the leftmost occlusion in the band's right
+ * half minus an allowance for the time and icons.
+ */
+export function statusStartX(input: {
+  layout: WindowLayout | null;
+  bandHeight: number;
+  viewportWidth: number;
+}): number | null {
+  const topBar = input.layout?.topBar;
+  if (topBar && topBar.width > 0) {
+    const end = topBar.x + topBar.width;
+    return end < input.viewportWidth - 1 ? end : null;
+  }
+  const inBand = (input.layout?.occlusions ?? []).filter(
+    (r) =>
+      r.y < input.bandHeight &&
+      r.y + r.height > 0 &&
+      r.x + r.width / 2 > input.viewportWidth / 2,
+  );
+  if (inBand.length === 0) return null;
+  return Math.min(...inBand.map((r) => r.x)) - STATUS_GLYPH_ALLOWANCE;
 }
 
 /** The capability a bb app advertises when it can expand the rail natively. */
@@ -153,6 +192,8 @@ export function placeRestoreInTopBand(input: {
   margin?: number;
   /** Height of bb's header row below the top inset (`--bb-app-chrome-row-height`). */
   chromeRowHeight?: number;
+  /** Where the time and status icons start (see `statusStartX`); null if unknown. */
+  statusStart?: number | null;
 }): { left: number; top: number; placement: "band" | "below-header" } {
   const margin = input.margin ?? 12;
   const pad = 4;
@@ -170,28 +211,15 @@ export function placeRestoreInTopBand(input: {
     );
   const leftEnd = margin;
   const rightEnd = input.viewportWidth - input.size - margin;
-  const fits = (left: number) =>
-    left >= margin && left <= rightEnd && !overlaps(left);
-  if (fitsBand) {
-    // Sit right next to the time: beside the status pill, the widest
-    // occlusion in the band, on its inner side (left of a pill at the top
-    // right, right of one at the top left).
-    const gap = 8;
-    const pill = input.occlusions
-      .filter((r) => r.y < input.insetTop && r.y + r.height > 0)
-      .sort((a, b) => b.width - a.width)[0];
-    if (pill) {
-      const pillOnRight = pill.x + pill.width / 2 > input.viewportWidth / 2;
-      const beside = pillOnRight
-        ? pill.x - gap - input.size
-        : pill.x + pill.width + gap;
-      if (fits(beside)) {
-        return { left: Math.round(beside), top, placement: "band" };
-      }
+  if (fitsBand && input.statusStart != null) {
+    // Right next to the time: just left of where the status content starts.
+    const beside = input.statusStart - 8 - input.size;
+    if (beside >= margin && !overlaps(beside)) {
+      return { left: Math.round(beside), top, placement: "band" };
     }
   }
-  // Otherwise: in the band, prefer the left end; below the header, prefer the
-  // right end, away from bb's sidebar control.
+  // Otherwise: in the band, the left end (clear of a top-right status bar);
+  // below the header, the right end, away from bb's sidebar control.
   const [first, second] = fitsBand ? [leftEnd, rightEnd] : [rightEnd, leftEnd];
   const left = !overlaps(first) ? first : !overlaps(second) ? second : first;
   return { left: Math.round(left), top, placement: fitsBand ? "band" : "below-header" };
@@ -221,4 +249,96 @@ export function isIOSWebKit({ userAgent, platform, maxTouchPoints }: BrowserPlat
 export function viewportWithoutFocusZoom(content: string): string | null {
   if (/\bmaximum-scale\s*=/u.test(content)) return null;
   return content.trim() ? `${content}, maximum-scale=1` : "maximum-scale=1";
+}
+
+/**
+ * True on the unfolded Duo's inner screen. Uses the screen size only: the
+ * keyboard shrinks the window, never the screen, so it can't flip this.
+ * No single-screen iPhone has a shorter side of 500pt or more; the folded
+ * cover screen is about 466pt.
+ */
+export function isUnfoldedScreen(screen: { width: number; height: number }): boolean {
+  return Math.min(screen.width, screen.height) >= 500;
+}
+
+/**
+ * Geometry for the unfolded top row: bb's thread header moves up into the
+ * status bar's row, stopping short of the status pill, with Restore placed
+ * right next to the time in the same row.
+ */
+export function computeTopRow(input: {
+  /** The top safe-area inset: the status band. */
+  insetTop: number;
+  /** bb's header row height. */
+  chromeRowHeight: number;
+  viewportWidth: number;
+  /** Where the time and status icons start (see `statusStartX`); null if unknown. */
+  statusStart: number | null;
+  /** Restore button size in this row. */
+  size: number;
+  gap?: number;
+  margin?: number;
+  /** Where Restore sits when it lives in the left rail instead of this row. */
+  railToggle?: { left: number; top: number } | null;
+}): { rowHeight: number; reserveRight: number; toggle: { left: number; top: number } } {
+  const gap = input.gap ?? 8;
+  const margin = input.margin ?? 12;
+  const rowHeight = Math.round(Math.max(input.insetTop, input.chromeRowHeight));
+  const statusStart = input.statusStart ?? input.viewportWidth - margin + gap;
+  if (input.railToggle) {
+    // Restore is in the rail: the row only keeps clear of the time.
+    return {
+      rowHeight,
+      reserveRight: Math.max(0, Math.round(input.viewportWidth - statusStart + gap)),
+      toggle: input.railToggle,
+    };
+  }
+  const toggleLeft = Math.round(statusStart - gap - input.size);
+  return {
+    rowHeight,
+    reserveRight: Math.max(0, Math.round(input.viewportWidth - toggleLeft + gap)),
+    toggle: { left: toggleLeft, top: Math.round((rowHeight - input.size) / 2) },
+  };
+}
+
+/** The narrowest the thread title may get in the top row before it is not worth it. */
+export const TOP_ROW_MIN_TITLE = 120;
+
+/**
+ * Whether bb's header fits in the top row beside the time: the title (at
+ * least TOP_ROW_MIN_TITLE) plus its fixed-width controls must fit between
+ * the row's left edge and Restore. When they don't (a narrow window or an
+ * open sidebar), the plugin keeps bb's normal header below the status band.
+ */
+export function headerFitsTopRow(input: {
+  rowLeft: number;
+  controlsWidth: number;
+  toggleLeft: number;
+  gap?: number;
+}): boolean {
+  const available = input.toggleLeft - (input.gap ?? 8) - input.rowLeft;
+  return available >= input.controlsWidth + TOP_ROW_MIN_TITLE;
+}
+
+/**
+ * Restore's spot in the left side rail on the unfolded screen: centred over
+ * bb's sidebar toggle (the rail's own control), vertically centred in the
+ * status band above it. Null when the band is too thin to hold the button
+ * or the rail's anchor isn't on screen.
+ */
+export function placeInLeftRail(input: {
+  insetTop: number;
+  /** bb's sidebar toggle in the rail. */
+  anchor: Rect | null;
+  size: number;
+  pad?: number;
+}): { left: number; top: number } | null {
+  const pad = input.pad ?? 4;
+  if (!input.anchor || input.anchor.width <= 0) return null;
+  if (input.insetTop < input.size + 2 * pad) return null;
+  const centre = input.anchor.x + input.anchor.width / 2;
+  return {
+    left: Math.max(pad, Math.round(centre - input.size / 2)),
+    top: Math.round((input.insetTop - input.size) / 2),
+  };
 }

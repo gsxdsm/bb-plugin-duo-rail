@@ -25,8 +25,17 @@ off. iOS then draws the status bar across the top and removes the rail inset,
 so bb uses the full width with its header below the status bar. Restore turns
 the vertical bar back on. There is no separate app setting: the plugin's
 expand/restore choice is the only switch, saved per device. The plugin keeps
-track of the rail side while the inset is gone. It shows the Restore button in
-the top band, right next to the status pill that holds the time. When that band is too thin to hold the
+track of the rail side while the inset is gone. On the folded screen, the Restore button sits in the top band
+right next to the time. The plugin uses the app's top bar guide (`topBar`)
+for where the time starts. Without it, it assumes the time and icons run
+160pt left of the reported camera cut-out.
+
+On the unfolded screen, Restore sits at the top of the left side rail, over
+bb's sidebar toggle. bb's own thread header (title, its menu and controls)
+moves up into the status row and stops before the time. If the header doesn't
+fit there (for example with the sidebar open on a narrow window), bb's normal
+header stays below the status band. "Unfolded" is decided from the screen
+size, so opening the keyboard can't switch layouts. When that band is too thin to hold the
 button (the unfolded screen), the button goes just below bb's header row at
 the right edge. The button stays after a page reload. The plugin restores the
 vertical bar when `mode` is `off` or the plugin is disabled or removed, but

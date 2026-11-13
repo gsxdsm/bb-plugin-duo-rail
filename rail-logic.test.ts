@@ -1,6 +1,13 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  computeTopRow,
+  placeInLeftRail,
+  headerFitsTopRow,
+  TOP_ROW_MIN_TITLE,
   isIOSWebKit,
+  STATUS_GLYPH_ALLOWANCE,
+  statusStartX,
+  isUnfoldedScreen,
   NativeRailController,
   placeRestoreInTopBand,
   RAIL_EXPANSION_CAPABILITY,
@@ -262,35 +269,52 @@ describe("resolveRailSide", () => {
 });
 
 describe("placeRestoreInTopBand", () => {
-  it("sits right next to the time: just left of a top-right status pill", () => {
-    // Simulator measurement with the bar off: 466pt wide, 82pt top band,
-    // status pill 200×82 at the top right.
-    const pill = { x: 266, y: 0, width: 200, height: 82 };
+  // Folded cover screen with the bar off: 466pt wide, 82pt band.
+  it("with the app's top bar guide, sits just left of where the time starts", () => {
     expect(
-      placeRestoreInTopBand({ insetTop: 82, viewportWidth: 466, occlusions: [pill], size: 36 }),
-    ).toEqual({ left: 222, top: 23, placement: "band" });
+      placeRestoreInTopBand({ insetTop: 82, viewportWidth: 466, occlusions: [], size: 36, statusStart: 300 }),
+    ).toEqual({ left: 256, top: 23, placement: "band" });
   });
 
-  it("sits just right of a top-left status pill", () => {
-    const pill = { x: 0, y: 0, width: 200, height: 82 };
-    expect(
-      placeRestoreInTopBand({ insetTop: 82, viewportWidth: 466, occlusions: [pill], size: 36 }),
-    ).toEqual({ left: 208, top: 23, placement: "band" });
+  it("never lands on the time: a camera-only occlusion is widened by the glyph allowance", () => {
+    // The device reports just the camera cut-out; the time is drawn to its left.
+    const camera = { x: 380, y: 10, width: 70, height: 40 };
+    const layout = { edge: "none" as const, behavior: "disabled" as const, occlusions: [camera] };
+    const statusStart = statusStartX({ layout, bandHeight: 82, viewportWidth: 466 });
+    expect(statusStart).toBe(380 - STATUS_GLYPH_ALLOWANCE);
+    const spot = placeRestoreInTopBand({ insetTop: 82, viewportWidth: 466, occlusions: [camera], size: 36, statusStart });
+    expect(spot.left + 36).toBeLessThanOrEqual(380 - STATUS_GLYPH_ALLOWANCE - 8);
   });
-});
 
-describe("placeRestoreInTopBand fallbacks", () => {
-  it("uses the left end when no pill is reported", () => {
+  it("uses the left end when the status start is unknown", () => {
     expect(
-      placeRestoreInTopBand({ insetTop: 82, viewportWidth: 466, occlusions: [], size: 36 }),
+      placeRestoreInTopBand({ insetTop: 82, viewportWidth: 466, occlusions: [], size: 36, statusStart: null }),
     ).toEqual({ left: 12, top: 23, placement: "band" });
   });
 
-  it("uses a free end when there is no room beside the pill", () => {
-    const pill = { x: 20, y: 0, width: 446, height: 82 };
+  it("uses the left end when there is no room beside the time", () => {
     expect(
-      placeRestoreInTopBand({ insetTop: 82, viewportWidth: 466, occlusions: [pill], size: 36 }).placement,
-    ).toBe("band");
+      placeRestoreInTopBand({ insetTop: 82, viewportWidth: 466, occlusions: [], size: 36, statusStart: 30 }),
+    ).toEqual({ left: 12, top: 23, placement: "band" });
+  });
+});
+
+describe("statusStartX", () => {
+  const base = { edge: "none" as const, behavior: "disabled" as const, occlusions: [] };
+  it("prefers the top bar guide's right edge", () => {
+    const layout = { ...base, topBar: { x: 0, y: 0, width: 300, height: 82 }, occlusions: [{ x: 380, y: 0, width: 80, height: 40 }] };
+    expect(statusStartX({ layout, bandHeight: 82, viewportWidth: 466 })).toBe(300);
+  });
+  it("ignores a full-width top bar (no status beside it)", () => {
+    const layout = { ...base, topBar: { x: 0, y: 0, width: 466, height: 44 } };
+    expect(statusStartX({ layout, bandHeight: 82, viewportWidth: 466 })).toBeNull();
+  });
+  it("ignores occlusions on the left half and below the band", () => {
+    const layout = { ...base, occlusions: [{ x: 10, y: 0, width: 40, height: 40 }, { x: 400, y: 200, width: 40, height: 40 }] };
+    expect(statusStartX({ layout, bandHeight: 82, viewportWidth: 466 })).toBeNull();
+  });
+  it("is null without a layout", () => {
+    expect(statusStartX({ layout: null, bandHeight: 82, viewportWidth: 466 })).toBeNull();
   });
 });
 
@@ -360,5 +384,68 @@ describe("focus zoom stopgap", () => {
     const capped = viewportWithoutFocusZoom(content);
     expect(capped).toBe(`${content}, maximum-scale=1`);
     expect(viewportWithoutFocusZoom(capped!)).toBeNull();
+  });
+});
+
+describe("unfolded top row", () => {
+  it("detects the unfolded screen from the screen size only", () => {
+    expect(isUnfoldedScreen({ width: 466, height: 678 })).toBe(false); // folded cover
+    expect(isUnfoldedScreen({ width: 430, height: 932 })).toBe(false); // Pro Max
+    expect(isUnfoldedScreen({ width: 1000, height: 700 })).toBe(true);
+    expect(isUnfoldedScreen({ width: 700, height: 1000 })).toBe(true);
+  });
+
+  it("puts Restore just left of the time, centred in the row, and reserves both", () => {
+    expect(
+      computeTopRow({ insetTop: 70, chromeRowHeight: 48, viewportWidth: 1000, statusStart: 800, size: 32 }),
+    ).toEqual({ rowHeight: 70, reserveRight: 248, toggle: { left: 760, top: 19 } });
+  });
+
+  it("keeps the header's own height when the band is thinner than it", () => {
+    const row = computeTopRow({ insetTop: 24, chromeRowHeight: 48, viewportWidth: 1000, statusStart: 800, size: 32 });
+    expect(row.rowHeight).toBe(48);
+    expect(row.toggle.top).toBe(8);
+  });
+
+  it("without a known status start, still reserves room for Restore at the right end", () => {
+    const row = computeTopRow({ insetTop: 70, chromeRowHeight: 48, viewportWidth: 1000, statusStart: null, size: 32 });
+    expect(row.toggle.left).toBe(1000 - 12 - 32);
+    expect(row.reserveRight).toBe(12 + 32 + 8);
+});
+});
+
+describe("headerFitsTopRow", () => {
+  it("fits when the title keeps its minimum beside bb's controls", () => {
+    expect(headerFitsTopRow({ rowLeft: 65, controlsWidth: 360, toggleLeft: 700 })).toBe(true);
+  });
+  it("does not fit when the sidebar narrows the row", () => {
+    // Sidebar open: the row starts at 336; 700 - 8 - 336 = 356 < 360 + min title.
+    expect(headerFitsTopRow({ rowLeft: 336, controlsWidth: 360, toggleLeft: 700 })).toBe(false);
+  });
+  it("is exact at the boundary", () => {
+    expect(headerFitsTopRow({ rowLeft: 0, controlsWidth: 100, toggleLeft: 100 + TOP_ROW_MIN_TITLE + 8 })).toBe(true);
+    expect(headerFitsTopRow({ rowLeft: 0, controlsWidth: 100, toggleLeft: 100 + TOP_ROW_MIN_TITLE + 7 })).toBe(false);
+  });
+});
+
+describe("Restore in the left side rail (unfolded)", () => {
+  const trigger = { x: 0, y: 70, width: 38, height: 48 }; // bb's sidebar toggle, below the band
+
+  it("centres over bb's sidebar toggle, in the status band above it", () => {
+    expect(placeInLeftRail({ insetTop: 70, anchor: trigger, size: 32 })).toEqual({ left: 4, top: 19 });
+    expect(placeInLeftRail({ insetTop: 70, anchor: { x: 6, y: 70, width: 36, height: 48 }, size: 32 })).toEqual({ left: 8, top: 19 });
+  });
+
+  it("is null when the band is too thin or the rail isn't there", () => {
+    expect(placeInLeftRail({ insetTop: 30, anchor: trigger, size: 32 })).toBeNull();
+    expect(placeInLeftRail({ insetTop: 70, anchor: null, size: 32 })).toBeNull();
+  });
+
+  it("with Restore in the rail, the top row only reserves the time", () => {
+    const row = computeTopRow({
+      insetTop: 70, chromeRowHeight: 48, viewportWidth: 1000, statusStart: 760, size: 32,
+      railToggle: { left: 4, top: 19 },
+    });
+    expect(row).toEqual({ rowHeight: 70, reserveRight: 248, toggle: { left: 4, top: 19 } });
   });
 });

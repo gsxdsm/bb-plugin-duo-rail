@@ -33,10 +33,15 @@ import {
   useSettings,
 } from "@get-bb/plugin-sdk/app";
 import {
+  computeTopRow,
+  headerFitsTopRow,
+  placeInLeftRail,
   isIOSWebKit,
+  isUnfoldedScreen,
   NativeRailController,
   placeRestoreInTopBand,
   resolveRailSide,
+  statusStartX,
   supportsNativeRailExpansion,
   type Rect,
   type Side,
@@ -72,6 +77,12 @@ const ATTR_RAIL = "data-bb-duo-rail";
 const ATTR_EXPANDED = "data-bb-duo-rail-expanded";
 const VAR_CAMERA = "--bb-duo-camera-height";
 const VAR_SIDE = "--bb-duo-side-inset";
+/** Unfolded + status bar at the top: bb's thread header moves up into the status row. */
+const ATTR_TOP_ROW = "data-bb-duo-top-row";
+const VAR_ROW_HEIGHT = "--bb-duo-top-row-height";
+const VAR_ROW_RESERVE = "--bb-duo-top-row-reserve";
+/** Restore in the top row matches bb's header icon buttons. */
+const ROW_TOGGLE_SIZE = 32;
 
 // ---------------------------------------------------------------------------
 // Store shared by the content script, the settings bridge and the action.
@@ -204,16 +215,22 @@ function isRect(value: unknown): value is Rect {
 function readWindowLayout(): WindowLayout | null {
   const raw = nativeBridge()?.windowLayout;
   if (typeof raw !== "object" || raw === null) return null;
-  const { verticalBar, occlusions } = raw as {
+  const { verticalBar, occlusions, topBar } = raw as {
     verticalBar?: { edge?: unknown; behavior?: unknown };
     occlusions?: unknown;
+    topBar?: unknown;
   };
   const edge = verticalBar?.edge;
   const behavior = verticalBar?.behavior;
   if (edge !== "none" && edge !== "leading" && edge !== "trailing") return null;
   if (behavior !== "automatic" && behavior !== "disabled") return null;
   if (!Array.isArray(occlusions)) return null;
-  return { edge, behavior, occlusions: occlusions.filter(isRect) };
+  return {
+    edge,
+    behavior,
+    occlusions: occlusions.filter(isRect),
+    topBar: isRect(topBar) ? topBar : null,
+  };
 }
 
 function sameWindowLayout(a: WindowLayout | null, b: WindowLayout | null): boolean {
@@ -305,6 +322,32 @@ body:has([role="dialog"]:not([data-state="closed"]), [role="alertdialog"]:not([d
 :is(.bb-duo-toggle, .bb-duo-sidebar):active { background: var(--accent); }
 :is(.bb-duo-toggle, .bb-duo-sidebar):focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
 :is(.bb-duo-toggle, .bb-duo-sidebar) svg { width: 18px; height: 18px; }
+
+/* Unfolded with the status bar at the top: bb's thread header (title, its
+   menu and controls) moves up into the status row and stops short of the
+   time; the rest of the page starts below that row. The sidebar column keeps
+   its own top inset. */
+html[${ATTR_TOP_ROW}] [data-app-content-shell] { padding-top: 0 !important; }
+html[${ATTR_TOP_ROW}] [data-app-content-shell] header:has([data-testid="app-page-header-content-row"]) {
+  height: var(${VAR_ROW_HEIGHT}, var(--bb-app-chrome-row-height, 3rem)) !important;
+  display: flex !important;
+  align-items: center !important;
+  padding-right: var(${VAR_ROW_RESERVE}, 0px) !important;
+}
+html[${ATTR_TOP_ROW}] [data-app-content-shell] header [data-testid="app-page-header-content-row"] { flex: 1 1 auto; min-width: 0; }
+/* Restore sits in that row or the left rail like one of bb's icon buttons. */
+html[${ATTR_TOP_ROW}] .bb-duo-toggle,
+.bb-duo-toggle[data-compact] {
+  width: ${ROW_TOGGLE_SIZE}px;
+  height: ${ROW_TOGGLE_SIZE}px;
+  border-radius: 8px;
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
+  color: var(--muted-foreground, var(--foreground));
+}
+html[${ATTR_TOP_ROW}] .bb-duo-toggle:active,
+.bb-duo-toggle[data-compact]:active { background: var(--accent); }
 `;
 
 // Lucide maximize-2 / minimize-2, drawn in currentColor.
@@ -468,18 +511,89 @@ function mountLayout({ signal }: { signal: AbortSignal }) {
   document.body.appendChild(cap);
 
   /** Centres the toggle in the rail, just below the camera block. */
+  /** Restore's spot in the left side rail when unfolded and expanded natively, if there is room. */
+  const leftRailSpot = (s: DuoState) => {
+    if (!s.nativeExpanded || !isUnfoldedScreen(window.screen)) return null;
+    const trigger = document.querySelector<HTMLElement>(
+      '[data-testid="app-sidebar-trigger-overlay"] [data-sidebar="trigger"]',
+    );
+    const b = trigger?.getBoundingClientRect();
+    return placeInLeftRail({
+      insetTop: parseFloat(getComputedStyle(probe).paddingTop) || 0,
+      anchor: b && b.width > 0 ? { x: b.left, y: b.top, width: b.width, height: b.height } : null,
+      size: ROW_TOGGLE_SIZE,
+    });
+  };
+
+  /**
+   * The unfolded top row's geometry, or null when it does not apply: not
+   * unfolded (screen size, so the keyboard can't flip it), not expanded
+   * natively, plugin off, or bb's header too wide to fit beside the time.
+   */
+  const topRowGeometry = (s: DuoState) => {
+    if (!s.nativeExpanded || s.mode === "off" || s.railSide === null) return null;
+    if (!isUnfoldedScreen(window.screen)) return null;
+    const row = document.querySelector<HTMLElement>('[data-testid="app-page-header-content-row"]');
+    if (!row) return null;
+    const insetTop = parseFloat(getComputedStyle(probe).paddingTop) || 0;
+    const geometry = computeTopRow({
+      insetTop,
+      chromeRowHeight: chromeRowHeightPx(root),
+      viewportWidth: window.innerWidth,
+      statusStart: statusStartX({
+        layout: s.windowLayout,
+        bandHeight: Math.max(insetTop, chromeRowHeightPx(root)),
+        viewportWidth: window.innerWidth,
+      }),
+      size: ROW_TOGGLE_SIZE,
+      railToggle: leftRailSpot(s),
+    });
+    // bb's controls are the row's last, fixed-width group; the title shrinks.
+    const controls = row.lastElementChild as HTMLElement | null;
+    const rowEnd = window.innerWidth - geometry.reserveRight + 8;
+    const fits = headerFitsTopRow({
+      rowLeft: row.getBoundingClientRect().left,
+      controlsWidth: controls && controls !== row.firstElementChild ? controls.getBoundingClientRect().width : 0,
+      toggleLeft: rowEnd,
+    });
+    return fits ? geometry : null;
+  };
+
   const placeToggle = (s: DuoState) => {
+    toggle.removeAttribute("data-compact");
     if (s.railSide === null) return;
     const probeStyle = getComputedStyle(probe);
     if (s.nativeExpanded) {
-      // The status bar is at the top now: Restore sits in the top band, clear
-      // of the status pill and camera.
+      // The status bar is at the top now. Restore goes right next to the
+      // time: from the app's top bar guide, or a conservative estimate.
+      const insetTop = parseFloat(probeStyle.paddingTop) || 0;
+      const statusStart = statusStartX({
+        layout: s.windowLayout,
+        bandHeight: Math.max(insetTop, chromeRowHeightPx(root)),
+        viewportWidth: window.innerWidth,
+      });
+      const row = root.hasAttribute(ATTR_TOP_ROW) ? topRowGeometry(s) : null;
+      if (row) {
+        root.style.setProperty(VAR_ROW_HEIGHT, `${row.rowHeight}px`);
+        root.style.setProperty(VAR_ROW_RESERVE, `${row.reserveRight}px`);
+        toggle.style.left = `${row.toggle.left}px`;
+        toggle.style.top = `${row.toggle.top}px`;
+        return;
+      }
+      const railSpot = leftRailSpot(s);
+      if (railSpot) {
+        toggle.setAttribute("data-compact", "");
+        toggle.style.left = `${railSpot.left}px`;
+        toggle.style.top = `${railSpot.top}px`;
+        return;
+      }
       const spot = placeRestoreInTopBand({
-        insetTop: parseFloat(probeStyle.paddingTop) || 0,
+        insetTop,
         viewportWidth: window.innerWidth,
         occlusions: s.windowLayout?.occlusions ?? [],
         size: TOGGLE_SIZE,
         chromeRowHeight: chromeRowHeightPx(root),
+        statusStart,
       });
       toggle.style.left = `${spot.left}px`;
       toggle.style.top = `${spot.top}px`;
@@ -517,6 +631,12 @@ function mountLayout({ signal }: { signal: AbortSignal }) {
     else root.removeAttribute(ATTR_EXPANDED);
     root.style.setProperty(VAR_CAMERA, `${railBlockHeight(s)}px`);
     root.style.setProperty(VAR_SIDE, `${s.sideInset}px`);
+    if (topRowGeometry(s)) root.setAttribute(ATTR_TOP_ROW, "");
+    else {
+      root.removeAttribute(ATTR_TOP_ROW);
+      root.style.removeProperty(VAR_ROW_HEIGHT);
+      root.style.removeProperty(VAR_ROW_RESERVE);
+    }
 
     toggle.hidden = s.railSide === null || s.mode === "off";
     // Only while the rail is free: expanded, the chat covers that spot.
@@ -566,7 +686,10 @@ function mountLayout({ signal }: { signal: AbortSignal }) {
     // Insets settle a frame after a resize or rotation.
     frame = requestAnimationFrame(() => {
       sync();
-      placeToggle(getState());
+      // Width changes (sidebar, rotation) don't change plugin state, but they
+      // decide whether the header fits the top row: re-apply directly.
+      apply();
+      if (observeShell()) retryUntilMounted();
     });
   };
 
@@ -584,6 +707,50 @@ function mountLayout({ signal }: { signal: AbortSignal }) {
   // another screen covers the page and no resize event follows.
   const insetObserver = new ResizeObserver(() => measure());
   insetObserver.observe(probe, { box: "border-box" });
+  // The top row's fit depends on the content area's width, which the sidebar
+  // changes without a window resize.
+  // The header row and bb's sidebar toggle mount (and change size) after this
+  // script, as threads load and the sidebar opens or closes.
+  const shellObserver = new ResizeObserver(() => measure());
+  const observed = new Map<string, Element>();
+  const OBSERVE = [
+    "[data-app-content-shell]",
+    '[data-testid="app-page-header-content-row"]',
+    '[data-testid="app-sidebar-trigger-overlay"] [data-sidebar="trigger"]',
+  ];
+  const observeShell = () => {
+    let missing = false;
+    for (const selector of OBSERVE) {
+      const el = document.querySelector(selector);
+      const previous = observed.get(selector);
+      if (el === previous) continue;
+      if (previous) shellObserver.unobserve(previous);
+      if (el) {
+        shellObserver.observe(el);
+        observed.set(selector, el);
+      } else {
+        observed.delete(selector);
+        missing = true;
+      }
+    }
+    return missing;
+  };
+  // Until they exist, look again shortly (bounded), so the first load gets the
+  // right layout without waiting for a resize.
+  let retries = 0;
+  let retryTimer: ReturnType<typeof setTimeout> | undefined;
+  const retryUntilMounted = () => {
+    clearTimeout(retryTimer);
+    if (!observeShell()) {
+      retries = 0;
+      return;
+    }
+    if (retries++ < 25) retryTimer = setTimeout(() => {
+      measure();
+      retryUntilMounted();
+    }, 400);
+  };
+  retryUntilMounted();
   let settleTimer: ReturnType<typeof setTimeout> | undefined;
   const unsubscribeNative = nativeBridge()?.subscribe?.((event) => {
     if (
@@ -617,6 +784,8 @@ function mountLayout({ signal }: { signal: AbortSignal }) {
     cancelAnimationFrame(frame);
     clearTimeout(settleTimer);
     insetObserver.disconnect();
+    shellObserver.disconnect();
+    clearTimeout(retryTimer);
     unsubscribeNative?.();
     unsubscribe();
     style.remove();
@@ -628,6 +797,9 @@ function mountLayout({ signal }: { signal: AbortSignal }) {
     root.removeAttribute(ATTR_EXPANDED);
     root.style.removeProperty(VAR_CAMERA);
     root.style.removeProperty(VAR_SIDE);
+    root.removeAttribute(ATTR_TOP_ROW);
+    root.style.removeProperty(VAR_ROW_HEIGHT);
+    root.style.removeProperty(VAR_ROW_RESERVE);
   };
 }
 
