@@ -332,6 +332,7 @@ ${ON("left")} .bb-duo-cap { display: block; left: 0; width: env(safe-area-inset-
   touch-action: manipulation;
 }
 :is(.bb-duo-toggle, .bb-duo-sidebar)[hidden] { display: none !important; }
+.bb-duo-toggle[data-overlapping] { visibility: hidden !important; pointer-events: none !important; }
 /* Stay out of the way of bb's sheets, drawers and dialogs. */
 body:has([role="dialog"]:not([data-state="closed"]), [role="alertdialog"]:not([data-state="closed"]), [data-vaul-drawer]:not([data-state="closed"])) :is(.bb-duo-toggle, .bb-duo-sidebar, .bb-duo-cap) { display: none !important; }
 :is(.bb-duo-toggle, .bb-duo-sidebar):active { background: var(--accent); }
@@ -740,9 +741,25 @@ function mountLayout({ signal }: { signal: AbortSignal }) {
     if (keyboardUp() && lastTogglePos) {
       toggle.style.left = lastTogglePos.left;
       toggle.style.top = lastTogglePos.top;
+      // The shrinking sidebar can slide its controls (Settings) under the
+      // frozen button. Rather than move, step aside until the keyboard closes,
+      // so a tap meant for them can't collapse the expansion.
+      toggle.toggleAttribute("data-overlapping", overlapsSidebarControl());
     } else {
+      toggle.removeAttribute("data-overlapping");
       lastTogglePos = { left: toggle.style.left, top: toggle.style.top };
     }
+  };
+  const overlapsSidebarControl = () => {
+    const left = parseFloat(toggle.style.left) || 0;
+    const top = parseFloat(toggle.style.top) || 0;
+    const size = toggle.getBoundingClientRect().width || ROW_TOGGLE_SIZE;
+    return Array.from(
+      document.querySelectorAll<HTMLElement>('[data-sidebar="sidebar"] button, [data-sidebar="sidebar"] a'),
+    ).some((el) => {
+      const r = el.getBoundingClientRect();
+      return r.width > 0 && r.left < left + size && r.right > left && r.top < top + size && r.bottom > top;
+    });
   };
 
   const placeToggle = (s: DuoState) => {
