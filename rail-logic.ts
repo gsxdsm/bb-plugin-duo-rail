@@ -412,3 +412,41 @@ export function placeAboveRailBottom(input: {
   }
   return top >= 0 ? { left: Math.max(0, left), top } : null;
 }
+
+/**
+ * Bottom of the status region at the top right (the pill with the time and
+ * icons): the lowest right-half occlusion in the band, or the band itself.
+ */
+export function statusBottom(input: {
+  occlusions: Rect[];
+  viewportWidth: number;
+  bandHeight: number;
+}): number {
+  const right = input.occlusions.filter(
+    (r) => r.y < input.bandHeight && r.x + r.width / 2 > input.viewportWidth / 2,
+  );
+  return Math.ceil(
+    right.length ? Math.max(...right.map((r) => r.y + r.height)) : input.bandHeight,
+  );
+}
+
+/** True when a box reaches horizontally into the status region (starting at `statusStart`). */
+export function reachesStatus(box: { left: number; right: number }, statusStart: number, gap = 8): boolean {
+  return box.right > statusStart - gap;
+}
+
+/**
+ * Whether the keyboard is up: a field has focus and the window got shorter at
+ * the same width. The keyboard never changes the width; a rotation or fold
+ * does, and then the layout should follow.
+ */
+export function keyboardLikelyUp(input: {
+  baseline: { width: number; height: number } | null;
+  now: { width: number; height: number };
+  editableFocused: boolean;
+  threshold?: number;
+}): boolean {
+  if (!input.editableFocused || input.baseline === null) return false;
+  if (Math.abs(input.now.width - input.baseline.width) > 1) return false;
+  return input.baseline.height - input.now.height > (input.threshold ?? 100);
+}

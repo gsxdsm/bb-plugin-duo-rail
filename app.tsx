@@ -37,6 +37,9 @@ import {
   computeTopRow,
   isIOSWebKit,
   isUnfoldedWindow,
+  keyboardLikelyUp,
+  reachesStatus,
+  statusBottom,
   placeAboveRailBottom,
   NativeRailController,
   placeRestoreInTopBand,
@@ -86,6 +89,12 @@ const VAR_TITLE_WIDTH = "--bb-duo-top-row-title";
 const VAR_SPLIT_HEIGHT = "--bb-duo-top-row-split";
 /** Offset that vertically centres bb's normal-height rows (sidebar header, toggle) on the status row. */
 const VAR_ROW_OFFSET = "--bb-duo-top-row-offset";
+/** Marks bb panels on the right that reach the status region; they start below it. */
+const ATTR_STATUS_CLEAR = "data-bb-duo-status-clear";
+const VAR_STATUS_BOTTOM = "--bb-duo-status-bottom";
+/** Folded, rail restored: Expand sits beside bb's sidebar toggle; the header row makes room. */
+const ATTR_LEFT_SLOT = "data-bb-duo-left-slot";
+const VAR_ROW_PAD_LEFT = "--bb-duo-row-pad-left";
 /** Restore in the top row matches bb's header icon buttons. */
 const ROW_TOGGLE_SIZE = 36;
 
@@ -342,6 +351,10 @@ html[${ATTR_TOP_ROW}] :is([data-sidebar="sidebar"], [data-sidebar="sidebar"] *)[
   margin-top: calc(-1 * var(${VAR_ROW_OFFSET}, 0px)) !important;
 }
 html[${ATTR_TOP_ROW}] [data-testid="app-sidebar-trigger-overlay"] { top: var(${VAR_ROW_OFFSET}, 0px) !important; }
+/* A panel on the right that reaches the status bar (e.g. Taskboard) starts
+   below it; the chat and sidebar keep the top. */
+html[${ATTR_TOP_ROW}] [${ATTR_STATUS_CLEAR}] { padding-top: var(${VAR_STATUS_BOTTOM}, 0px) !important; }
+html[${ATTR_LEFT_SLOT}] [data-testid="app-page-header-content-row"] { padding-left: var(${VAR_ROW_PAD_LEFT}) !important; }
 html[${ATTR_TOP_ROW}="full"] [data-app-content-shell] header:has([data-testid="app-page-header-content-row"]) {
   height: var(${VAR_ROW_HEIGHT}, var(--bb-app-chrome-row-height, 3rem)) !important;
   display: flex !important;
@@ -564,6 +577,11 @@ function mountLayout({ signal }: { signal: AbortSignal }) {
     );
     const t = trigger?.getBoundingClientRect();
     if (!t || t.width <= 0) return null;
+    // Only a docked, visible sidebar has a rail. In bb's compact layout the
+    // sidebar is a drawer (a closed dialog off screen).
+    const sidebar = document.querySelector<HTMLElement>('[data-sidebar="sidebar"]');
+    const sb = sidebar?.getBoundingClientRect();
+    if (!sidebar || !sb || sb.width <= 0 || sb.left < -1 || sidebar.closest('[role="dialog"]')) return null;
     const centreX = t.left + t.width / 2;
     const railControls = Array.from(
       document.querySelectorAll<HTMLElement>('[data-sidebar="sidebar"] button, [data-sidebar="sidebar"] a'),
@@ -605,8 +623,19 @@ function mountLayout({ signal }: { signal: AbortSignal }) {
       titleGroup?.querySelector<HTMLElement>('button[aria-label="Thread actions"]') ??
       (titleGroup ? Array.from(titleGroup.querySelectorAll<HTMLElement>("button")).at(-1) ?? null : null);
     const rowLeft = row.getBoundingClientRect().left;
-    // The row must stop just before the time (Restore lives in the rail).
-    const rowEnd = window.innerWidth - geometry.reserveRight;
+    const header = row.closest("header") ?? row;
+    const headerRight = header.getBoundingClientRect().right;
+    const headerPad = 16; // bb's px-4
+    const statusStart =
+      statusStartX({
+        layout: s.windowLayout,
+        bandHeight: Math.max(insetTop, chromeRowHeightPx(root)),
+        viewportWidth: window.innerWidth,
+      }) ?? window.innerWidth;
+    // The row ends before the time, or at the header's own edge when that comes
+    // first (a panel open on the right). If bb's controls don't fit beside the
+    // title there, they drop to the second line ("split").
+    const rowEnd = Math.min(statusStart - 8, headerRight - headerPad);
     const mode = chooseTopRowMode({
       rowLeft,
       rowEnd,
@@ -618,13 +647,73 @@ function mountLayout({ signal }: { signal: AbortSignal }) {
     return {
       ...geometry,
       mode,
+      reserveRight: Math.max(headerPad, Math.round(headerRight - rowEnd)),
       titleWidth: Math.max(0, Math.floor(rowEnd - rowLeft)),
       splitHeight: geometry.rowHeight + chromeRowHeightPx(root),
     };
   };
 
+  /** Marks right-hand panels that reach the status region; clears the rest. */
+  const clearPanelsFromStatus = (s: DuoState, active: boolean) => {
+    const marked = Array.from(document.querySelectorAll<HTMLElement>(`[${ATTR_STATUS_CLEAR}]`));
+    if (!active) {
+      for (const el of marked) el.removeAttribute(ATTR_STATUS_CLEAR);
+      root.style.removeProperty(VAR_STATUS_BOTTOM);
+      return;
+    }
+    const insetTop = parseFloat(getComputedStyle(probe).paddingTop) || 0;
+    const band = Math.max(insetTop, chromeRowHeightPx(root));
+    const start =
+      statusStartX({ layout: s.windowLayout, bandHeight: band, viewportWidth: window.innerWidth }) ??
+      window.innerWidth;
+    root.style.setProperty(
+      VAR_STATUS_BOTTOM,
+      `${statusBottom({ occlusions: s.windowLayout?.occlusions ?? [], viewportWidth: window.innerWidth, bandHeight: band })}px`,
+    );
+    const panels = Array.from(
+      document.querySelectorAll<HTMLElement>("[data-app-content-shell] aside[data-surface-tone]"),
+    );
+    for (const el of marked) if (!panels.includes(el)) el.removeAttribute(ATTR_STATUS_CLEAR);
+    for (const el of panels) {
+      const b = el.getBoundingClientRect();
+      const onScreen = b.width > 0 && b.left < window.innerWidth - 1;
+      if (onScreen && reachesStatus({ left: b.left, right: b.right }, start)) {
+        el.setAttribute(ATTR_STATUS_CLEAR, "");
+      } else el.removeAttribute(ATTR_STATUS_CLEAR);
+    }
+  };
+
+  // While typing, Restore stays where it was: the keyboard shrinks the window
+  // (and bb's sidebar footer), which would otherwise move it.
+  let keyboardBaseline: { width: number; height: number } | null = null;
+  let lastTogglePos: { left: string; top: string } | null = null;
+  const editableFocused = () => {
+    const el = document.activeElement as HTMLElement | null;
+    return !!el && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName));
+  };
+  const keyboardUp = () => {
+    const now = { width: window.innerWidth, height: window.innerHeight };
+    const up = keyboardLikelyUp({ baseline: keyboardBaseline, now, editableFocused: editableFocused() });
+    if (!up) keyboardBaseline = now;
+    return up;
+  };
+  const holdToggleWhileTyping = () => {
+    if (keyboardUp() && lastTogglePos) {
+      toggle.style.left = lastTogglePos.left;
+      toggle.style.top = lastTogglePos.top;
+    } else {
+      lastTogglePos = { left: toggle.style.left, top: toggle.style.top };
+    }
+  };
+
   const placeToggle = (s: DuoState) => {
+    placeToggleNow(s);
+    holdToggleWhileTyping();
+  };
+
+  const placeToggleNow = (s: DuoState) => {
     toggle.removeAttribute("data-compact");
+    if (s.railSide === null) clearLeftSlot();
     if (s.railSide === null) return;
     const probeStyle = getComputedStyle(probe);
     if (s.nativeExpanded) {
@@ -646,29 +735,102 @@ function mountLayout({ signal }: { signal: AbortSignal }) {
           VAR_ROW_OFFSET,
           `${Math.max(0, Math.round((row.rowHeight - chromeRowHeightPx(root)) / 2))}px`,
         );
+        const slot = leftRailSpot(s) ? null : slotBesideSidebarToggle();
+        if (slot) {
+          toggle.setAttribute("data-compact", "");
+          toggle.style.left = `${slot.left}px`;
+          toggle.style.top = `${slot.top}px`;
+          return;
+        }
+        clearLeftSlot();
         toggle.style.left = `${row.toggle.left}px`;
         toggle.style.top = `${row.toggle.top}px`;
         return;
       }
       const railSpot = leftRailSpot(s);
       if (railSpot) {
+        clearLeftSlot();
         toggle.setAttribute("data-compact", "");
         toggle.style.left = `${railSpot.left}px`;
         toggle.style.top = `${railSpot.top}px`;
         return;
       }
+      if (isUnfoldedWindow(window, s.windowLayout)) {
+        // Unfolded but compact (no docked rail): beside bb's sidebar toggle.
+        const slot = slotBesideSidebarToggle();
+        if (slot) {
+          toggle.setAttribute("data-compact", "");
+          toggle.style.left = `${slot.left}px`;
+          toggle.style.top = `${slot.top}px`;
+          return;
+        }
+      }
+      clearLeftSlot();
+      // Folded: the band's upper-left corner, clear of the rounded corner,
+      // the time on the right and bb's sidebar toggle below the band.
+      void statusStart;
       const spot = placeRestoreInTopBand({
         insetTop,
         viewportWidth: window.innerWidth,
         occlusions: s.windowLayout?.occlusions ?? [],
-        size: TOGGLE_SIZE,
+        size: ROW_TOGGLE_SIZE,
+        margin: 16,
         chromeRowHeight: chromeRowHeightPx(root),
-        statusStart,
+        statusStart: null,
       });
+      toggle.setAttribute("data-compact", "");
       toggle.style.left = `${spot.left}px`;
       toggle.style.top = `${spot.top}px`;
       return;
     }
+    // Folded with the rail restored: Expand goes to the upper-left corner,
+    // in the slot beside bb's sidebar toggle (which owns the corner itself).
+    const slot = foldedLeftSlot(s);
+    if (slot) {
+      toggle.setAttribute("data-compact", "");
+      toggle.style.left = `${slot.left}px`;
+      toggle.style.top = `${slot.top}px`;
+      placeSidebarButtonInRail(s, probeStyle);
+      return;
+    }
+    clearLeftSlot();
+    placeSidebarButtonInRail(s, probeStyle, true);
+  };
+
+  /** The slot right of bb's sidebar toggle, reserving room in the header row; null if not applicable. */
+  const foldedLeftSlot = (s: DuoState) => {
+    if (controller === null || s.nativeExpanded || s.mode === "off") return null;
+    if (isUnfoldedWindow(window, s.windowLayout)) return null;
+    return slotBesideSidebarToggle();
+  };
+
+  /** The slot right of bb's sidebar toggle, reserving room in the header row. */
+  const slotBesideSidebarToggle = () => {
+    const trigger = document.querySelector<HTMLElement>(
+      '[data-testid="app-sidebar-trigger-overlay"] [data-sidebar="trigger"]',
+    );
+    const row = document.querySelector<HTMLElement>('[data-testid="app-page-header-content-row"]');
+    const t = trigger?.getBoundingClientRect();
+    if (!t || t.width <= 0 || !row) return null;
+    if (!root.hasAttribute(ATTR_LEFT_SLOT)) {
+      // bb's own left padding (room for its toggle), read before we change it.
+      const base = parseFloat(getComputedStyle(row).paddingLeft) || 0;
+      root.style.setProperty(VAR_ROW_PAD_LEFT, `${Math.round(base + ROW_TOGGLE_SIZE + 4)}px`);
+      root.setAttribute(ATTR_LEFT_SLOT, "");
+    }
+    return {
+      left: Math.round(t.right + 4),
+      top: Math.round(t.top + (t.height - ROW_TOGGLE_SIZE) / 2),
+    };
+  };
+
+  const clearLeftSlot = () => {
+    root.removeAttribute(ATTR_LEFT_SLOT);
+    root.style.removeProperty(VAR_ROW_PAD_LEFT);
+  };
+
+  /** The rail below the camera block: the toggle (when it lives there) and the sidebar button. */
+  const placeSidebarButtonInRail = (s: DuoState, probeStyle: CSSStyleDeclaration, withToggle = false) => {
     const rail =
       parseFloat(s.railSide === "right" ? probeStyle.paddingRight : probeStyle.paddingLeft) || 0;
     const top = Math.max(parseFloat(probeStyle.paddingTop) || 0, railBlockHeight(s)) + 12;
@@ -677,10 +839,13 @@ function mountLayout({ signal }: { signal: AbortSignal }) {
       Math.max(4, centre - TOGGLE_SIZE / 2),
       window.innerWidth - TOGGLE_SIZE - 4,
     );
-    toggle.style.left = `${Math.round(left)}px`;
-    toggle.style.top = `${Math.round(top)}px`;
+    if (withToggle) {
+      toggle.style.left = `${Math.round(left)}px`;
+      toggle.style.top = `${Math.round(top)}px`;
+    }
+    const sidebarTop = withToggle ? top + TOGGLE_SIZE + 10 : top;
     sidebarButton.style.left = `${Math.round(left)}px`;
-    sidebarButton.style.top = `${Math.round(top + TOGGLE_SIZE + 10)}px`;
+    sidebarButton.style.top = `${Math.round(sidebarTop)}px`;
   };
 
   setState({ override: readOverride() });
@@ -704,6 +869,7 @@ function mountLayout({ signal }: { signal: AbortSignal }) {
     const topRow = topRowGeometry(s);
     if (topRow) root.setAttribute(ATTR_TOP_ROW, topRow.mode);
     else clearTopRow();
+    clearPanelsFromStatus(s, topRow !== null);
 
     toggle.hidden = s.railSide === null || s.mode === "off";
     // Only while the rail is free: expanded, the chat covers that spot.
@@ -869,6 +1035,8 @@ function mountLayout({ signal }: { signal: AbortSignal }) {
     root.style.removeProperty(VAR_CAMERA);
     root.style.removeProperty(VAR_SIDE);
     clearTopRow();
+    clearPanelsFromStatus(getState(), false);
+    clearLeftSlot();
   };
 }
 

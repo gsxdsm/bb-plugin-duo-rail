@@ -25,19 +25,24 @@ off. iOS then draws the status bar across the top and removes the rail inset,
 so bb uses the full width with its header below the status bar. Restore turns
 the vertical bar back on. There is no separate app setting: the plugin's
 expand/restore choice is the only switch, saved per device. The plugin keeps
-track of the rail side while the inset is gone. On the folded screen, the Restore button sits in the top band
-right next to the time. The plugin uses the app's top bar guide (`topBar`)
-for where the time starts. Without it, it uses the left edge of the reported
-status pill; if only a small camera cut-out is reported, it leaves 160pt for
-the time and icons.
+track of the rail side while the inset is gone. On the folded screen, Restore sits in the upper-left corner of the top band.
+With the rail restored, Expand sits in the top-left slot right of bb's sidebar
+toggle, and the header row makes room for it. The plugin uses the app's top
+bar guide (`topBar`) for where the time starts. Without it, it uses the left
+edge of the reported status pill; if only a small camera cut-out is reported,
+it leaves 160pt for the time and icons.
 
 On the unfolded screen the layout follows Orca: the page uses the top of the
 screen. bb's thread header (title, its "…" menu and controls) and the sidebar's
 header share the clock's row, vertically centred on it, and stop before the
 time. If the whole header doesn't fit there (for example with the sidebar
 open), only the title and its menu stay in that row and bb's other controls
-drop to the line below. Restore sits in the left side rail just above
-settings, with a small 16px icon and a 36pt touch area. "Unfolded" means a
+drop to the line below. A panel on the right that reaches the status bar
+(such as Taskboard) starts below it; the chat and sidebar keep the top.
+Restore sits in the left side rail just above settings, with a small 16px
+icon and a 36pt touch area. Without a docked rail (bb's compact layout), it
+sits beside bb's sidebar toggle. While the keyboard is up, Restore stays where
+it was; it re-anchors when the keyboard closes or the width changes. "Unfolded" means a
 window at least 600pt wide, or an app top bar guide at least 450pt wide.
 Opening the keyboard changes neither. When that band is too thin to hold the
 button (the unfolded screen), the button goes just below bb's header row at

@@ -3,6 +3,9 @@ import {
   chooseTopRowMode,
   CAMERA_ONLY_MAX_WIDTH,
   computeTopRow,
+  keyboardLikelyUp,
+  reachesStatus,
+  statusBottom,
   placeAboveRailBottom,
   placeInLeftRail,
   headerFitsTopRow,
@@ -517,5 +520,34 @@ describe("placeAboveRailBottom", () => {
   });
   it("is null without rail controls", () => {
     expect(placeAboveRailBottom({ railControls: [], centreX: 24, size: 32 })).toBeNull();
+  });
+});
+
+describe("right panel and header clearance", () => {
+  it("measures the status region's bottom from the pill", () => {
+    expect(statusBottom({ occlusions: [{ x: 807, y: 0, width: 144, height: 82 }], viewportWidth: 951, bandHeight: 82 })).toBe(82);
+    expect(statusBottom({ occlusions: [], viewportWidth: 951, bandHeight: 82 })).toBe(82);
+  });
+  it("a right panel at 636..951 reaches the status region; the chat header ending at 636 doesn't", () => {
+    expect(reachesStatus({ left: 636, right: 951 }, 807)).toBe(true);
+    expect(reachesStatus({ left: 320, right: 636 }, 807)).toBe(false);
+    expect(reachesStatus({ left: 320, right: 951 }, 807)).toBe(true);
+  });
+});
+
+describe("keyboardLikelyUp (Restore stays put while typing)", () => {
+  const base = { width: 951, height: 669 };
+  it("is up when a field has focus and the window shrank at the same width", () => {
+    expect(keyboardLikelyUp({ baseline: base, now: { width: 951, height: 350 }, editableFocused: true })).toBe(true);
+  });
+  it("is not up without a focused field, or for small changes", () => {
+    expect(keyboardLikelyUp({ baseline: base, now: { width: 951, height: 350 }, editableFocused: false })).toBe(false);
+    expect(keyboardLikelyUp({ baseline: base, now: { width: 951, height: 640 }, editableFocused: true })).toBe(false);
+  });
+  it("a width change (rotation, fold) is never the keyboard", () => {
+    expect(keyboardLikelyUp({ baseline: base, now: { width: 669, height: 400 }, editableFocused: true })).toBe(false);
+  });
+  it("without a baseline it can't tell, so it isn't up", () => {
+    expect(keyboardLikelyUp({ baseline: null, now: base, editableFocused: true })).toBe(false);
   });
 });
