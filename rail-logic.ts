@@ -70,6 +70,7 @@ export const SET_RAIL_EXPANDED = "set-rail-expanded";
 
 export interface RailNative {
   capabilities?: unknown;
+  railExpansion?: unknown;
   request?: (kind: string, payload: unknown) => Promise<unknown>;
 }
 
@@ -82,8 +83,9 @@ export function supportsNativeRailExpansion(
   return (
     native !== null &&
     typeof native.request === "function" &&
-    Array.isArray(native.capabilities) &&
-    native.capabilities.includes(RAIL_EXPANSION_CAPABILITY)
+    (native.railExpansion === true ||
+      (Array.isArray(native.capabilities) &&
+        native.capabilities.includes(RAIL_EXPANSION_CAPABILITY)))
   );
 }
 

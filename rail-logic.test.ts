@@ -71,6 +71,12 @@ async function flushMicrotasks() {
 }
 
 describe("supportsNativeRailExpansion", () => {
+  it("accepts the version 4 compatible rail support field only with a request bridge", () => {
+    expect(supportsNativeRailExpansion({ railExpansion: true, request: async () => null })).toBe(true);
+    expect(supportsNativeRailExpansion({ railExpansion: true })).toBe(false);
+    expect(supportsNativeRailExpansion({ railExpansion: "true", request: async () => null })).toBe(false);
+  });
+
   it("needs the capability and a request function", () => {
     expect(supportsNativeRailExpansion(null)).toBe(false);
     expect(supportsNativeRailExpansion({ capabilities: ["safe-area"], request: async () => null })).toBe(false);
