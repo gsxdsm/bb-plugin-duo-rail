@@ -164,6 +164,67 @@ describe("NativeRailController transitions", () => {
     expect(f.calls).toHaveLength(2);
   });
 
+  it("dispose while an expansion is still in flight restores afterwards", async () => {
+    const f = fakeNative();
+    const c = new NativeRailController(f.native, false);
+    c.set(true);
+    await flushMicrotasks(); // expand request in flight, native still reports false
+    expect(c.nativeExpanded).toBe(false);
+    const done = c.dispose();
+    await flushMicrotasks();
+    expect(f.calls.map((call) => call.payload)).toEqual([{ expanded: true }]); // nothing concurrent
+    await f.succeed(); // the expansion lands
+    await flushMicrotasks();
+    expect(f.calls.map((call) => call.payload)).toEqual([{ expanded: true }, { expanded: false }]);
+    await f.succeed();
+    await done;
+    expect(c.nativeExpanded).toBe(false); // not stranded expanded
+    expect(f.maxInFlight).toBe(1);
+  });
+
+  it("dispose after observe(false) arrives while the expansion is in flight still restores", async () => {
+    const f = fakeNative();
+    const c = new NativeRailController(f.native, false);
+    c.set(true);
+    await flushMicrotasks(); // expand in flight
+    c.observe(false); // a stale layout event reports the bar still on
+    const done = c.dispose();
+    await flushMicrotasks();
+    await f.succeed(); // the expansion lands
+    await flushMicrotasks();
+    expect(f.calls.map((call) => call.payload)).toEqual([{ expanded: true }, { expanded: false }]);
+    await f.succeed();
+    await done;
+    expect(c.nativeExpanded).toBe(false);
+  });
+
+  it("dispose with an expansion queued but not yet sent restores without expanding", async () => {
+    const f = fakeNative();
+    const c = new NativeRailController(f.native, false);
+    c.set(true); // queued; the flush has not run yet
+    const done = c.dispose();
+    await flushMicrotasks();
+    // The queue collapses to the final wanted state (false == applied): no requests.
+    expect(f.calls).toHaveLength(0);
+    await done;
+    expect(c.nativeExpanded).toBe(false);
+  });
+
+  it("dispose after a failed expansion still restores", async () => {
+    const f = fakeNative();
+    const c = new NativeRailController(f.native, false);
+    const first = c.set(true);
+    await flushMicrotasks();
+    await f.fail(); // state now unknown
+    await first;
+    const done = c.dispose();
+    await flushMicrotasks();
+    expect(f.calls.at(-1)?.payload).toEqual({ expanded: false });
+    await f.succeed();
+    await done;
+    expect(c.nativeExpanded).toBe(false);
+  });
+
   it("dispose does nothing when the plugin never expanded native", async () => {
     const f = fakeNative();
     const c = new NativeRailController(f.native, null);

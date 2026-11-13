@@ -83,10 +83,19 @@ export class NativeRailController {
     return this.chain;
   }
 
-  /** Queues a final restore (only if this plugin expanded native) and stops accepting new states. */
+  /**
+   * Queues a final restore and stops accepting new states. Restores when
+   * native is (or may be) expanded: it is known expanded, an expansion is
+   * still wanted (queued or in flight, so `applied` may not show it yet), or
+   * this plugin expanded it and the state is unknown. The restore runs after
+   * any in-flight request, so native never stays expanded.
+   */
   dispose(): Promise<void> {
     if (this.disposed) return this.chain;
-    const restore = this.applied === true || (this.expandedByUs && this.applied !== false);
+    const restore =
+      this.applied === true ||
+      this.wanted === true ||
+      (this.expandedByUs && this.applied === null);
     this.disposed = true;
     if (!restore) return this.chain;
     this.wanted = false;
